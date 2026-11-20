@@ -1,13 +1,52 @@
-# ContentHub 阶段 5
+# ContentHub 最终版
 
-ContentHub 是自媒体选题与内容生产工具。阶段 5 新增数据复盘与雷达，延续选题看板、改稿台、RSS 信源管理和离线 Mock。前端使用 React 18、TypeScript、Vite、Tailwind CSS、lucide-react、react-markdown、remark-gfm 和 Recharts。
+ContentHub 是自媒体选题与内容生产工具。包含选题看板、改稿台、RSS 信源管理和数据复盘与雷达四个视图，默认离线 Mock。阶段 6 增加 Docker 多阶段构建与 Nginx 静态分发。前端使用 React 18、TypeScript、Vite、Tailwind CSS、lucide-react、react-markdown、remark-gfm 和 Recharts。
+
+## 用 Docker 运行
+
+Dockerfile 使用 Node 构建 Vite 产物，最终镜像由 Nginx 提供 `dist` 静态文件。首次构建需要下载官方基础镜像和 npm 依赖。启动后默认使用 Mock，监听映射到本机回环地址。
+
+### Windows Docker Desktop
+
+启动 Docker Desktop，使用 Linux 容器。在下载 ZIP 的目录打开 PowerShell，执行：
+
+```powershell
+Expand-Archive -LiteralPath .\ContentHub-final.zip -DestinationPath .\contenthub-final
+Set-Location .\contenthub-final\ContentHub
+docker build -t contenthub:mock .
+docker run --rm -d --name contenthub -p 127.0.0.1:8088:80 contenthub:mock
+Start-Process 'http://127.0.0.1:8088/'
+```
+
+### Linux
+
+Docker Engine 启动后，在下载 ZIP 的目录执行：
+
+```bash
+unzip ContentHub-final.zip -d contenthub-final
+cd contenthub-final/ContentHub
+docker build -t contenthub:mock .
+docker run --rm -d --name contenthub -p 127.0.0.1:8088:80 contenthub:mock
+```
+
+浏览器打开 `http://127.0.0.1:8088/`。也可直接访问 `/#/topics`、`/#/workbench/3`、`/#/sources` 和 `/#/analytics`。若 8088 已被占用，修改映射左侧的主机端口，并使用对应地址。HashRouter 的路由片段由浏览器处理，Nginx 对缺失静态文件返回 HTTP 404。
+
+停止容器的命令在 PowerShell 与 Linux 中相同。启动时使用了 `--rm`，停止后容器会自动移除。
+
+```text
+docker stop contenthub
+```
+
+### 容器环境变量
+
+`VITE_*` 在构建时进入浏览器可见的产物。此 Dockerfile 固定构建 Mock，运行时的 `docker run -e` 无法切换已编译的 SPA。`.dockerignore` 排除本地环境文件、凭据、依赖、Git 和构建产物，源码 ZIP 中保留的 `.env.example` 仅供本地开发参考。真实 NocoDB 和 n8n 联调另行配置受保护的同源代理及访问控制。不要把真实令牌放入构建参数、镜像或浏览器包，也不要公开暴露未保护的 Webhook。 [Vite 构建期变量说明](https://vite.dev/guide/env-and-mode)
 
 ## 初始化与启动
 
 要求 Node.js 22.13+（22 系列）或 24+，以及 npm。源码包包含锁文件。
 
 ```bash
-unzip ContentHub-stage-5.zip
+unzip ContentHub-final.zip
 cd ContentHub
 cp .env.example .env.local
 npm ci --no-audit --no-fund
@@ -66,10 +105,13 @@ npm run preview -- --host 127.0.0.1
 
 ```text
 ContentHub/
+├── .dockerignore
 ├── .env.example
 ├── .gitignore
+├── Dockerfile
 ├── README.md
 ├── index.html
+├── nginx.conf
 ├── package-lock.json
 ├── package.json
 ├── src/
@@ -187,4 +229,4 @@ ContentHub/
 
 部署环境可使用现有同源反向代理，例如将基础地址设为 `/internal/nocodb/api/v2` 和 `/internal/n8n/webhook`。若代理负责注入凭证，可让浏览器的 `VITE_NOCODB_TOKEN` 使用公开标记 `proxy-managed`。代理应在完成用户鉴权和授权后覆盖客户端发送的 `xc-token`，仅放行所需表、方法及两个 Webhook 路径。可按现有设施选用身份网关、VPN 或内网访问控制。跨源 CORS 用于控制浏览器可读取响应的来源。身份校验、表和工作流的访问授权仍需独立配置。此方案由部署环境提供，本阶段只交付前端适配。
 
-阶段 5 在此验收。阶段 6 在收到明确的「继续」后启动。
+阶段 6 完成 ContentHub 的离线 Mock 源码交付。

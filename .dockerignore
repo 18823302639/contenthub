@@ -1,0 +1,32 @@
+# 仅将静态构建所需文件传入构建上下文。
+**
+!Dockerfile
+!.dockerignore
+!index.html
+!nginx.conf
+!package.json
+!package-lock.json
+!tsconfig.json
+!vite.config.ts
+!src
+!src/**
+
+# 上述源码例外之后仍排除嵌套的本地配置与凭据。
+**/.env*
+**/.git
+**/.git/**
+**/.npmrc
+**/.ssh
+**/.ssh/**
+**/secrets
+**/secrets/**
+**/node_modules
+**/node_modules/**
+**/dist
+**/dist/**
+**/*.key
+**/*.pem
+**/*.p12
+**/*.pfx
+**/id_rsa
+**/id_ed25519
