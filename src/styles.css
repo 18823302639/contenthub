@@ -1,0 +1,9 @@
+@import "tailwindcss";
+
+:root {
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei",
+    "Noto Sans CJK SC", sans-serif;
+  background: #f8f9fb;
+  color: #0f172a;
+  color-scheme: light;
+}
