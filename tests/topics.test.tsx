@@ -27,6 +27,7 @@ function choose(label: string, value: string) {
 afterEach(() => {
   cleanup()
   vi.restoreAllMocks()
+  vi.unstubAllGlobals()
 })
 
 describe('选题看板', () => {
@@ -192,7 +193,8 @@ describe('选题看板', () => {
     expect(screen.queryByText('读取测试错误')).toBeNull()
   })
 
-  it('可进入信源，运营入口保持占位，未知路由可回到看板', async () => {
+  it('可从未知路由进入信源、运营和选题看板', async () => {
+    vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
     openApp(createContentHubApi({}), '/not-found')
     expect(screen.getByRole('heading', { name: '页面不存在' })).toBeTruthy()
     const nav = within(screen.getByRole('navigation', { name: '主导航' }))
@@ -200,9 +202,9 @@ describe('选题看板', () => {
     expect(screen.getByRole('heading', { name: '信源管理' })).toBeTruthy()
     expect(await screen.findByRole('table', { name: 'RSS 信源' })).toBeTruthy()
     fireEvent.click(nav.getByRole('link', { name: '运营数据' }))
-    expect(screen.getByRole('heading', { name: '运营数据' })).toBeTruthy()
-    expect(screen.getByText('阶段 5 开放')).toBeTruthy()
-    fireEvent.click(screen.getByRole('link', { name: '返回选题看板' }))
+    expect(await screen.findByRole('heading', { name: '运营数据' })).toBeTruthy()
+    expect(await screen.findByRole('heading', { name: '阅读量趋势' })).toBeTruthy()
+    fireEvent.click(nav.getByRole('link', { name: '选题看板' }))
     await card(retail)
   })
 })

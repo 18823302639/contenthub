@@ -23,6 +23,7 @@ const originalShowModal = Object.getOwnPropertyDescriptor(HTMLDialogElement.prot
 const originalClose = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'close')
 
 beforeEach(() => {
+  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
   // jsdom 只模拟 dialog 开关；真实浏览器负责 modal 惯用的焦点约束与 Esc。
   Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
     configurable: true,
@@ -37,6 +38,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup()
   vi.restoreAllMocks()
+  vi.unstubAllGlobals()
   for (const [key, descriptor] of [['showModal', originalShowModal], ['close', originalClose]] as const) {
     if (descriptor) Object.defineProperty(HTMLDialogElement.prototype, key, descriptor)
     else Reflect.deleteProperty(HTMLDialogElement.prototype, key)

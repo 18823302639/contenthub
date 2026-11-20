@@ -1,3 +1,4 @@
+import { dailyMetricKey } from '../utils/metricDays'
 import type { ProductionItem } from '../types/schema'
 import type { RecordStore, TableName, Tables, WebhookReceipt, WebhookRequest } from './contracts'
 import { makeMockData } from './mockData'
@@ -40,6 +41,13 @@ export function createMockBackend() {
       const id = rows.reduce((last, row) => Math.max(last, row.id), 0) + 1
       const timestamps = table === 'rss_sources' ? { created_at: new Date().toISOString() } : {}
       const row = { ...input, id, ...timestamps } as Tables[typeof table]
+      if ('recorded_at' in row) {
+        const key = dailyMetricKey(row)
+        if (key === null) throw new Error('无法确认运营数据的 UTC+8 日期。')
+        if (data.account_metrics.some(record => dailyMetricKey(record) === key)) {
+          throw new Error('同一内容在该平台当天已有记录。')
+        }
+      }
       rows.push(row)
       return structuredClone(row)
     },

@@ -1,13 +1,13 @@
-# ContentHub 阶段 4
+# ContentHub 阶段 5
 
-ContentHub 是自媒体选题与内容生产工具。阶段 4 新增 RSS 信源管理，延续固定侧栏、HashRouter、选题看板、改稿台及离线 Mock。前端使用 React 18、TypeScript、Vite、Tailwind CSS、lucide-react、react-markdown 和 remark-gfm。
+ContentHub 是自媒体选题与内容生产工具。阶段 5 新增数据复盘与雷达，延续选题看板、改稿台、RSS 信源管理和离线 Mock。前端使用 React 18、TypeScript、Vite、Tailwind CSS、lucide-react、react-markdown、remark-gfm 和 Recharts。
 
 ## 初始化与启动
 
 要求 Node.js 22.13+（22 系列）或 24+，以及 npm。源码包包含锁文件。
 
 ```bash
-unzip ContentHub-stage-4.zip
+unzip ContentHub-stage-5.zip
 cd ContentHub
 cp .env.example .env.local
 npm ci --no-audit --no-fund
@@ -32,7 +32,7 @@ npm run preview -- --host 127.0.0.1
 - 对「待筛选」选题点击「确认选题」。界面先保存并回读「已确认-待核对」，然后调用一次 `fetch-and-draft`。收到受理回执后，以有限次数的单条读取查询回写，实际读到「AI初稿完成」时才显示初稿完成。
 - 保存回读异常时，先用「刷新列表」核对状态。状态已保存但 Webhook 受理未确认时，核对 n8n 执行记录，并刷新查看选题状态。刷新和轮询都只读，失败不会回滚已保存的状态。
 - 「放弃」保存「已放弃」并停止该条前端轮询，已发布和已放弃的选题不提供放弃按钮。Mock 不会用较迟完成的初稿覆盖已放弃状态。真实工作流须自行校验记录状态和执行标识，以避免并发写入或重复执行。前端按一次操作控制提交次数。
-- 「进入改稿台」打开 `#/workbench/:id`。运营数据入口显示阶段 5 占位。
+- 「进入改稿台」打开 `#/workbench/:id`。
 
 ## 改稿台用法
 
@@ -50,6 +50,17 @@ npm run preview -- --host 127.0.0.1
 - 「新增信源」打开弹窗，填写名称、完整的 HTTP(S) RSS 链接、赛道与分组，并选择是否立即启用。打开时默认沿用所选分组，全部视图中默认选生产池。表单校验链接格式，页面只管理信源记录。
 - 新增结果未确认时，使用「核对列表」查询。优先根据已有回执 ID 核对，再以列表中实际读到的字段为准。若一次查询未找到记录，可稍后继续核对。同一应用实例内，同分组、同链接的待核实新增不会再次提交。可选择「新增其他信源」暂存核对并继续录入。服务明确拒绝输入时，表单保留内容，修正后可重试。关闭弹窗后仍可在页面看到后台保存结果。
 - 离线 Mock 的变动保留于当前应用实例，重载页面恢复合成示例。
+
+## 数据复盘与雷达
+
+打开 `#/analytics`。默认展示公众号近 7 天，可在公众号、头条、B站之间切换，也可选择近 30 天。日期按 **UTC+8 自然日** 归档，两个窗口都含今天，分别从今天往前数第 7 或 30 个日期开始。录入日期写入当天 UTC+8 零点。跨午夜后刷新或再次操作页面，会按当前日期重新算窗。
+
+- 阅读量、展现量和收益汇总已经核对的单日新增。展现量和阅读量按非负整数录入，百分数采用平台填报值。无可用数据的日子显示「—」，折线保留断点。实际填报的 0 会保留。
+- 对同一平台，仅用有效 CTR 和与之对应的正展现量加权。100 次展现对应 10%、1000 次展现对应 4% 时，合并 CTR 约为 4.55%。阅读量与展现量的比值不参与 CTR 计算。
+- 「录入运营数据」需要选择已发布内容、平台和日期，填该自然日的非重叠新增，不录平台累计快照。缺失项待数据齐全后填写。没有展现量可用于加权时，加权 CTR 显示为缺失。
+- 同一内容 ID、平台、UTC+8 日期是一次录入的组合。保存前读取列表核对重复；在当前应用实例中，写入返回不明时只读核对。有同日记录时仍需匹配本次回执 ID 和指标，才会确认保存。无法确定旧记录日期时，先核对该内容在该平台的旧记录。Mock 存储在写入时拒绝重复。真实服务中的跨终端并发仍需数据库端唯一约束或幂等写入，前端检查不能保证该约束。
+- 对纳入口径的同日同组合记录，指标完全相同只计一次，冲突整组隔离。真实模式下，当前会话通过录入且回执与回读确认的记录才计入；缺少单日新增证明的历史数据会排除，包括累计快照。当前数据契约没有持久化口径标记，重载后先前保存在真实服务的记录也归入待核对范围。
+- 雷达只展示商业价值评分与信息差评分均大于等于 4 的机会，等于 4 的记录可入选。
 
 ## 源码目录
 
@@ -77,6 +88,13 @@ ContentHub/
 │   │   ├── ContentHubApp.tsx
 │   │   └── useRecordWrites.ts
 │   ├── features/
+│   │   ├── analytics/
+│   │   │   ├── AddMetricDialog.tsx
+│   │   │   ├── AnalyticsPage.tsx
+│   │   │   ├── MetricTrends.tsx
+│   │   │   ├── analytics.css
+│   │   │   ├── review.ts
+│   │   │   └── useAnalytics.ts
 │   │   ├── sources/
 │   │   │   ├── AddSourceDialog.tsx
 │   │   │   ├── SourcesPage.tsx
@@ -97,10 +115,13 @@ ContentHub/
 │   ├── types/
 │   │   └── schema.ts
 │   ├── utils/
-│   │   └── externalUrl.ts
+│   │   ├── externalUrl.ts
+│   │   └── metricDays.ts
 │   └── vite-env.d.ts
 ├── tests/
+│   ├── analytics.test.tsx
 │   ├── api.test.ts
+│   ├── metrics.test.ts
 │   ├── sources.test.tsx
 │   ├── topics.test.tsx
 │   └── workbench.test.tsx
@@ -166,4 +187,4 @@ ContentHub/
 
 部署环境可使用现有同源反向代理，例如将基础地址设为 `/internal/nocodb/api/v2` 和 `/internal/n8n/webhook`。若代理负责注入凭证，可让浏览器的 `VITE_NOCODB_TOKEN` 使用公开标记 `proxy-managed`。代理应在完成用户鉴权和授权后覆盖客户端发送的 `xc-token`，仅放行所需表、方法及两个 Webhook 路径。可按现有设施选用身份网关、VPN 或内网访问控制。跨源 CORS 用于控制浏览器可读取响应的来源。身份校验、表和工作流的访问授权仍需独立配置。此方案由部署环境提供，本阶段只交付前端适配。
 
-阶段 4 在此验收。阶段 5 在收到明确的「继续」后启动。
+阶段 5 在此验收。阶段 6 在收到明确的「继续」后启动。

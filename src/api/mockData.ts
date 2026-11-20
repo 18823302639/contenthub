@@ -1,3 +1,5 @@
+import { platforms } from '../types/schema'
+import { calendarDay, calendarDayStart, shiftCalendarDay } from '../utils/metricDays'
 import type { TableName, Tables } from './contracts'
 
 type MockData = { [Table in TableName]: Tables[Table][] }
@@ -175,21 +177,20 @@ export function makeMockData(now: number): MockData {
         compliance_risk: '低',
       },
     ],
-    account_metrics: [24, 18, 12, 7, 5, 4, 2, 1].map((daysAgo, index) => {
-      const impressions = 1200 + index * 200
-      const views = 108 + index * 26
-      return {
-        id: index + 1,
+    // 合成单日新增数据，每个内容、平台与 UTC+8 日期只有一条。
+    account_metrics: platforms.flatMap((platform, platformIndex) =>
+      [26, 21, 16, 13, 10, 8, 6, 5, 4, 2, 1].map((daysAgo, index) => ({
+        id: platformIndex * 100 + index + 1,
         production_id: 5,
         title: '【模拟】按退款发生日复盘一组虚构订单',
-        platform: (['公众号', '头条', 'B站'] as const)[index % 3],
-        impressions,
-        views,
-        ctr: Math.round(10_000 * views / impressions) / 100,
+        platform,
+        impressions: 900 + platformIndex * 290 + index * 73,
+        views: 68 + platformIndex * 31 + index * 9 + (index % 3) * 15,
+        ctr: [3.6, 4.2, 5.1, 4.7, 6.2, 5.4, 6.9, 6.1, 7.4, 6, 7.9][index] + platformIndex * 0.3,
         completion_rate: 55 + index,
         revenue: 12 + index * 3.5,
-        recorded_at: date(daysAgo),
-      }
-    }),
+        recorded_at: calendarDayStart(shiftCalendarDay(calendarDay(now), -daysAgo)),
+      })),
+    ),
   }
 }

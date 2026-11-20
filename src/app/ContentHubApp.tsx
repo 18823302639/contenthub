@@ -1,12 +1,17 @@
 import { ArrowLeft, ChartNoAxesCombined, ChevronRight, Layers3, LayoutGrid, Rss, SquarePen } from 'lucide-react'
+import { lazy, Suspense } from 'react'
 import { Link, Navigate, NavLink, Route, Routes, useLocation } from 'react-router-dom'
 import type { ContentHubApi } from '../api'
+import { useAnalytics } from '../features/analytics/useAnalytics'
 import { SourcesPage } from '../features/sources/SourcesPage'
 import { useSources } from '../features/sources/useSources'
 import { TopicsPage } from '../features/topics/TopicsPage'
 import { useRecordWrites } from './useRecordWrites'
 import { WorkbenchPage } from '../features/workbench/WorkbenchPage'
 import { useTopicBoard } from '../features/topics/useTopicBoard'
+
+const AnalyticsPage = lazy(() => import('../features/analytics/AnalyticsPage')
+  .then(module => ({ default: module.AnalyticsPage })))
 
 const links = [
   { to: '/topics', label: '选题看板', icon: LayoutGrid },
@@ -15,11 +20,10 @@ const links = [
   { to: '/analytics', label: '运营数据', icon: ChartNoAxesCombined },
 ]
 
-function Placeholder({ title, text, phase }: { title: string; text: string; phase?: number }) {
+function Placeholder({ title, text }: { title: string; text: string }) {
   return (
     <section className="placeholder" aria-labelledby="placeholder-title">
       <h1 id="placeholder-title">{title}</h1>
-      {phase && <p className="placeholder-phase">阶段 {phase} 开放</p>}
       <p>{text}</p>
       <Link className="button button--secondary" to="/topics"><ArrowLeft size={15} aria-hidden />返回选题看板</Link>
     </section>
@@ -30,6 +34,7 @@ export function ContentHubApp({ api }: { api: ContentHubApi }) {
   const writes = useRecordWrites()
   const board = useTopicBoard(api, writes)
   const sources = useSources(api)
+  const analytics = useAnalytics(api)
   const { pathname } = useLocation()
   const active = links.find(link => pathname === link.to || pathname.startsWith(link.to + '/'))
   const mode = api.mode === 'mock' ? 'Mock · 离线演示' : '真实数据模式'
@@ -74,7 +79,11 @@ export function ContentHubApp({ api }: { api: ContentHubApi }) {
             <Route path="/workbench" element={<Placeholder title="改稿台" text="从选题看板选择一条选题进入改稿台。" />} />
             <Route path="/workbench/:id" element={<WorkbenchPage api={api} writes={writes} onWrite={board.observeWorkbenchWrite} refreshBoard={board.refreshIfLoaded} />} />
             <Route path="/sources" element={<SourcesPage model={sources} />} />
-            <Route path="/analytics" element={<Placeholder title="运营数据" text="在这里查看账号指标和雷达机会。" phase={5} />} />
+            <Route path="/analytics" element={(
+              <Suspense fallback={<p className="results-count" role="status">正在加载运营数据…</p>}>
+                <AnalyticsPage model={analytics} />
+              </Suspense>
+            )} />
             <Route path="*" element={<Placeholder title="页面不存在" text="请通过左侧导航打开工作区页面。" />} />
           </Routes>
         </main>
