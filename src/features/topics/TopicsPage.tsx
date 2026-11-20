@@ -119,7 +119,7 @@ export function TopicsPage({ board }: { board: ReturnType<typeof useTopicBoard> 
             {visible.length > 0 ? (
               <div className="topic-grid">
                 {visible.map(item => (
-                  <TopicCard key={item.id} item={item} activity={activities[item.id]} onConfirm={board.confirm} onAbandon={board.abandon} />
+                  <TopicCard key={item.id} item={item} activity={activities[item.id]} writeBusy={board.lockedIds.has(item.id)} onConfirm={board.confirm} onAbandon={board.abandon} />
                 ))}
               </div>
             ) : (

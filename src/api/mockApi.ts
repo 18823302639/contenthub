@@ -81,7 +81,7 @@ export function createMockBackend() {
       if (action === 'fetch-and-draft') {
         updateProduction(item, {
           raw_content: `【模拟原文】${item.raw_title}\n\n${item.key_data_points}`,
-          fact_check: '【模拟核查】先核对样本量、指标口径与对照条件。示例数据为合成数据。',
+          fact_check: '【模拟核查】示例数据为合成数据。\n\n- [ ] 核对样本量与指标口径\n- [ ] 确认对照条件',
           draft_md: `# ${item.zh_title}\n\n${item.key_data_points}\n\n写作练习：补充口径定义与适用边界。`,
           workflow_status: 'AI初稿完成',
         })

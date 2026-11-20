@@ -1,0 +1,227 @@
+import { ArrowLeft, ArrowUpRight, Clipboard, RefreshCw, Save, Sparkles } from 'lucide-react'
+import { useId, useState } from 'react'
+import { Link, useParams } from 'react-router-dom'
+import type { RecordWrites } from '../../app/useRecordWrites'
+import type { ContentHubApi } from '../../api'
+import type { ProductionItem } from '../../types/schema'
+import { externalUrl } from '../../utils/externalUrl'
+import { MarkdownPreview } from './MarkdownPreview'
+import { useWorkbench } from './useWorkbench'
+import './workbench.css'
+
+interface WorkbenchProps {
+  api: ContentHubApi
+  writes: RecordWrites
+  onWrite: (record: ProductionItem) => void
+  refreshBoard: () => void
+}
+type Tab<T extends string> = { value: T; label: string }
+
+const sourceTabs = [
+  { value: 'raw', label: '原文素材' },
+  { value: 'checks', label: 'AI 事实核查清单' },
+] as const
+const editorTabs = [
+  { value: 'editor', label: '编辑' },
+  { value: 'preview', label: '预览' },
+  { value: 'incoming', label: '回写稿' },
+] as const
+
+function Tabs<T extends string>({ group, label, options, value, select }: {
+  group: string
+  label: string
+  options: readonly Tab<T>[]
+  value: T
+  select: (value: T) => void
+}) {
+  return (
+    <div className="wb-tabs" role="tablist" aria-label={label} onKeyDown={event => {
+      const current = options.findIndex(tab => tab.value === value)
+      let next: number
+      switch (event.key) {
+        case 'ArrowLeft': next = (current + options.length - 1) % options.length; break
+        case 'ArrowRight': next = (current + 1) % options.length; break
+        case 'Home': next = 0; break
+        case 'End': next = options.length - 1; break
+        default: return
+      }
+      event.preventDefault()
+      select(options[next].value)
+      event.currentTarget.querySelectorAll('button')[next]?.focus()
+    }}>
+      {options.map(tab => (
+        <button
+          key={tab.value}
+          type="button"
+          id={`${group}-${tab.value}`}
+          role="tab"
+          aria-selected={value === tab.value}
+          aria-controls={`${group}-panel`}
+          tabIndex={value === tab.value ? 0 : -1}
+          onClick={() => select(tab.value)}
+        >{tab.label}</button>
+      ))}
+    </div>
+  )
+}
+
+function Sources({ record }: { record: ProductionItem }) {
+  const [tab, setTab] = useState<(typeof sourceTabs)[number]['value']>('raw')
+  const group = useId()
+  const url = externalUrl(record.url)
+
+  return (
+    <section className="wb-panel" aria-labelledby={`${group}-title`}>
+      <div className="wb-panel-title">
+        <h2 id={`${group}-title`}>参考素材</h2>
+        {url && (
+          <a className="topic-origin" href={url} target="_blank" rel="noopener noreferrer">
+            打开原文<ArrowUpRight size={14} aria-hidden />
+          </a>
+        )}
+      </div>
+      <Tabs group={group} label="参考素材" options={sourceTabs} value={tab} select={setTab} />
+      <div className="wb-source-body" role="tabpanel" id={`${group}-panel`} aria-labelledby={`${group}-${tab}`} tabIndex={0}>
+        {tab === 'raw' ? (
+          record.raw_content?.trim()
+            ? <p className="wb-original">{record.raw_content}</p>
+            : <p className="wb-muted">暂无原文素材。</p>
+        ) : (
+          record.fact_check?.trim()
+            ? <MarkdownPreview text={record.fact_check} />
+            : <p className="wb-muted">暂无 AI 事实核查清单。</p>
+        )}
+      </div>
+    </section>
+  )
+}
+
+function EditorPanel({ workbench }: { workbench: ReturnType<typeof useWorkbench> }) {
+  const [selected, select] = useState<(typeof editorTabs)[number]['value']>('editor')
+  const group = useId()
+  const { doc, dirty, edit, adoptIncoming } = workbench
+  if (!doc) return null
+  const tab = selected === 'incoming' && doc.incoming === null ? 'editor' : selected
+  const options = doc.incoming === null ? editorTabs.slice(0, 2) : editorTabs
+
+  return (
+    <section className="wb-panel" aria-labelledby={`${group}-title`}>
+      <div className="wb-panel-title">
+        <h2 id={`${group}-title`}>稿件</h2>
+        <span className={dirty ? 'wb-dirty' : 'wb-muted'}>{dirty ? '有未保存编辑' : doc.record.final_md?.trim() ? '定稿' : '初稿'}</span>
+      </div>
+      <Tabs group={group} label="稿件视图" options={options} value={tab} select={select} />
+      <div className="wb-editor-body" role="tabpanel" id={`${group}-panel`} aria-labelledby={`${group}-${tab}`} tabIndex={tab === 'editor' ? -1 : 0}>
+        {tab === 'editor' && (
+          <>
+            {!doc.markdown && <p className="wb-muted wb-empty-document">暂无稿件，可直接编辑。</p>}
+            <textarea className="wb-editor" aria-label="Markdown 编辑器" spellCheck={false}
+              value={doc.markdown} onChange={event => edit(event.target.value)} />
+          </>
+        )}
+        {tab === 'preview' && (
+          doc.markdown.trim() ? <MarkdownPreview text={doc.markdown} /> : <p className="wb-muted">暂无可预览的稿件。</p>
+        )}
+        {tab === 'incoming' && (
+          <>
+            <div className="wb-incoming">
+              <p>当前编辑仍保留。采用回写稿会替换编辑区。</p>
+              <button className="button button--secondary" onClick={() => { adoptIncoming(); select('editor') }}>
+                用回写稿替换当前编辑
+              </button>
+            </div>
+            {doc.incoming?.trim() ? <MarkdownPreview text={doc.incoming} /> : <p className="wb-muted">回写稿为空。</p>}
+          </>
+        )}
+      </div>
+    </section>
+  )
+}
+
+function Workbench({ api, id, writes, onWrite, refreshBoard }: WorkbenchProps & { id: number }) {
+  const workbench = useWorkbench(api, id, writes, onWrite, refreshBoard)
+  const { doc, operation, notice, copyNotice } = workbench
+  const record = doc?.record
+  const noteId = useId()
+
+  return (
+    <section aria-labelledby="workbench-heading">
+      <header className="page-header wb-page-header">
+        <div>
+          <h1 id="workbench-heading">改稿台</h1>
+          <p>选题记录 #{id}{record ? ` · ${record.zh_title}` : ''}</p>
+        </div>
+        <div className="wb-header-actions">
+          <Link className="button button--quiet" to="/topics"><ArrowLeft size={15} aria-hidden />返回选题看板</Link>
+          <button className="button button--secondary" disabled={operation !== null} onClick={() => void workbench.refresh()}>
+            <RefreshCw size={15} aria-hidden />刷新记录
+          </button>
+        </div>
+      </header>
+
+      {!record && operation === 'reading' && <p className="read-error wb-loading" role="status">正在加载选题…</p>}
+      {notice && (
+        <div className={notice.error ? 'topic-feedback topic-feedback--warning wb-notice' : 'topic-feedback wb-notice'} role={notice.error ? 'alert' : 'status'}>
+          {notice.rewriteComplete && doc?.incoming != null ? '改稿结果已回写，当前编辑已保留。' : notice.text}
+        </div>
+      )}
+      {copyNotice && (
+        <div className={copyNotice.error ? 'topic-feedback topic-feedback--warning wb-notice' : 'topic-feedback wb-notice'} role={copyNotice.error ? 'alert' : 'status'}>
+          {copyNotice.text}
+        </div>
+      )}
+      {record && doc && (
+        <>
+          <div className="wb-toolbar">
+            <div className="wb-note">
+              <label htmlFor={noteId}>修改意见</label>
+              <textarea rows={2} id={noteId} placeholder="例如：删去套话，保留样本量和比较口径"
+                value={workbench.note} onChange={event => workbench.setNote(event.target.value)} />
+            </div>
+            <div className="wb-toolbar-buttons">
+              <button className="button button--primary" disabled={!workbench.canRewrite} onClick={() => void workbench.rewrite()}>
+                <Sparkles size={15} aria-hidden />AI 去味改稿
+              </button>
+              <button className="button button--secondary" disabled={!workbench.canSave} onClick={() => void workbench.save()}>
+                <Save size={15} aria-hidden />保存定稿
+              </button>
+              <button className="button button--secondary" disabled={!doc.markdown.trim()} onClick={() => void workbench.copy()}>
+                <Clipboard size={15} aria-hidden />复制全文
+              </button>
+              <button className="button button--secondary" disabled={!workbench.canPublish} onClick={() => void workbench.publish()}>
+                标记为已发布
+              </button>
+            </div>
+            <div className="wb-record-status">
+              <span className="pill pill--neutral">{record.workflow_status}</span>
+              {record.workflow_status === '已发布' && record.published_at &&
+                <time dateTime={record.published_at}>{record.published_at}</time>}
+              {workbench.pending && !notice && <span>等待回写，可刷新记录查询进度。</span>}
+              {!workbench.pending && workbench.dirty && <span>保存编辑后可提交 AI 改稿或登记发布。</span>}
+            </div>
+          </div>
+          <div className="wb-grid">
+            <Sources record={record} />
+            <EditorPanel workbench={workbench} />
+          </div>
+        </>
+      )}
+    </section>
+  )
+}
+
+export function WorkbenchPage(props: WorkbenchProps) {
+  const { id } = useParams()
+  const recordId = Number(id)
+  if (!id || !/^[1-9]\d*$/.test(id) || !Number.isSafeInteger(recordId)) {
+    return (
+      <section className="placeholder" aria-labelledby="invalid-workbench-heading">
+        <h1 id="invalid-workbench-heading">改稿台</h1>
+        <p role="alert">选题 ID 无效。</p>
+        <Link className="button button--secondary" to="/topics">返回选题看板</Link>
+      </section>
+    )
+  }
+
+  return <Workbench key={recordId} {...props} id={recordId} />
+}

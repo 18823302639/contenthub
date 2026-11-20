@@ -1,13 +1,13 @@
-# ContentHub 阶段 2
+# ContentHub 阶段 3
 
-ContentHub 是自媒体选题与内容生产工具。阶段 2 提供固定侧栏、HashRouter 与选题看板，沿用阶段 1 的数据契约、Mock 模式及真实接口适配。前端使用 React 18、TypeScript、Vite、Tailwind CSS 和 lucide-react。
+ContentHub 是自媒体选题与内容生产工具。阶段 3 新增改稿台，延续固定侧栏、HashRouter、选题看板及离线 Mock。前端使用 React 18、TypeScript、Vite、Tailwind CSS、lucide-react、react-markdown 和 remark-gfm。
 
 ## 初始化与启动
 
 要求 Node.js 22.13+（22 系列）或 24+，以及 npm。源码包包含锁文件。
 
 ```bash
-unzip ContentHub-stage-2.zip
+unzip ContentHub-stage-3.zip
 cd ContentHub
 cp .env.example .env.local
 npm ci --no-audit --no-fund
@@ -32,7 +32,16 @@ npm run preview -- --host 127.0.0.1
 - 对「待筛选」选题点击「确认选题」。界面先保存并回读「已确认-待核对」，然后调用一次 `fetch-and-draft`。收到受理回执后，以有限次数的单条读取查询回写，实际读到「AI初稿完成」时才显示初稿完成。
 - 保存回读异常时，先用「刷新列表」核对状态。状态已保存但 Webhook 受理未确认时，核对 n8n 执行记录，并刷新查看选题状态。刷新和轮询都只读，失败不会回滚已保存的状态。
 - 「放弃」保存「已放弃」并停止该条前端轮询，已发布和已放弃的选题不提供放弃按钮。Mock 不会用较迟完成的初稿覆盖已放弃状态。真实工作流须自行校验记录状态和执行标识，以避免并发写入或重复执行。前端按一次操作控制提交次数。
-- 「进入改稿台」打开 `#/workbench/:id`。改稿台、信源管理和运营数据入口仅显示后续阶段占位。
+- 「进入改稿台」打开 `#/workbench/:id`。信源管理和运营数据入口显示后续阶段占位。
+
+## 改稿台用法
+
+- 在看板选择「进入改稿台」，也可直接打开 `#/workbench/3` 查看 Mock 初稿，或打开 `#/workbench/4` 查看已有定稿。左栏可切换原文素材与 AI 事实核查清单。
+- 右栏优先显示 `final_md`，定稿为空时使用 `draft_md`。空稿可直接输入。预览支持 GFM 表格和任务清单，跳过原始 HTML，远程图片显示替代文字。复制对象始终是当前编辑区全文。
+- 「保存定稿」只写入 `final_md`。保存提交后仍可继续输入，回读保留随后输入的内容。「标记为已发布」针对已经保存的定稿，仅更新 `workflow_status` 和 `published_at`。看板与改稿台按选题共用写入锁。
+- 填写修改意见并点击「AI 去味改稿」。界面先保存 `revision_note` 与「需AI润色」，确认回读后发出一次 `rewrite-draft`。Webhook 受理后只读查询回写。若读到对应意见和「待人工终审」，改稿台才显示结果已回写。提交受理后返回看板，有限次数的查询仍可更新已打开过的看板。进入本来就处于待回写状态的记录时，改稿台也会只读跟进。
+- 编辑区有未保存改动时，回写稿单独供对照。可保存当前编辑，或在「回写稿」Tab 主动选用回写稿。需要提交 AI 改稿时，先保存已有编辑。等待初稿或润色回写期间仍可编辑与复制，写入操作等流程状态更新后开放。
+- 读写失败或 Webhook 受理结果不明时，可刷新记录核对。刷新只读取记录。若记录仍显示「需AI润色」且没有可见结果，核对对应 n8n 执行记录。离开该选题或重载页面前，请保存需要保留的本地编辑。
 
 ## 源码目录
 
@@ -57,20 +66,29 @@ ContentHub/
 │   │   ├── productionFilters.ts
 │   │   └── webhookClient.ts
 │   ├── app/
-│   │   └── ContentHubApp.tsx
+│   │   ├── ContentHubApp.tsx
+│   │   └── useRecordWrites.ts
 │   ├── features/
-│   │   └── topics/
-│   │       ├── TopicCard.tsx
-│   │       ├── TopicsPage.tsx
-│   │       └── useTopicBoard.ts
+│   │   ├── topics/
+│   │   │   ├── TopicCard.tsx
+│   │   │   ├── TopicsPage.tsx
+│   │   │   └── useTopicBoard.ts
+│   │   └── workbench/
+│   │       ├── MarkdownPreview.tsx
+│   │       ├── WorkbenchPage.tsx
+│   │       ├── useWorkbench.ts
+│   │       └── workbench.css
 │   ├── main.tsx
 │   ├── styles.css
 │   ├── types/
 │   │   └── schema.ts
+│   ├── utils/
+│   │   └── externalUrl.ts
 │   └── vite-env.d.ts
 ├── tests/
 │   ├── api.test.ts
-│   └── topics.test.tsx
+│   ├── topics.test.tsx
+│   └── workbench.test.tsx
 ├── tsconfig.json
 └── vite.config.ts
 ```
@@ -133,4 +151,4 @@ ContentHub/
 
 部署环境可使用现有同源反向代理，例如将基础地址设为 `/internal/nocodb/api/v2` 和 `/internal/n8n/webhook`。若代理负责注入凭证，可让浏览器的 `VITE_NOCODB_TOKEN` 使用公开标记 `proxy-managed`。代理应在完成用户鉴权和授权后覆盖客户端发送的 `xc-token`，仅放行所需表、方法及两个 Webhook 路径。可按现有设施选用身份网关、VPN 或内网访问控制。跨源 CORS 用于控制浏览器可读取响应的来源。身份校验、表和工作流的访问授权仍需独立配置。此方案由部署环境提供，本阶段只交付前端适配。
 
-阶段 2 在此验收。阶段 3 在收到明确的「继续」后启动。
+阶段 3 在此验收。阶段 4 在收到明确的「继续」后启动。

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { WriteReadbackError } from '../../api'
 import type { ContentHubApi } from '../../api'
+import type { RecordWrites } from '../../app/useRecordWrites'
 import type { ProductionItem } from '../../types/schema'
 
 const confirmedStatus = '已确认-待核对'
@@ -85,7 +86,7 @@ function observeActivity(item: ProductionItem, activity?: TopicActivity): TopicA
   return activity
 }
 
-export function useTopicBoard(api: ContentHubApi) {
+export function useTopicBoard(api: ContentHubApi, writes: RecordWrites) {
   const [state, setState] = useState<BoardState>({
     items: null, loading: true, loadError: null, activities: {}, lastActivityId: null,
   })
@@ -206,6 +207,8 @@ export function useTopicBoard(api: ContentHubApi) {
 
   async function confirm(item: ProductionItem) {
     if (busy.current.has(item.id) || !canConfirm(item, state.activities[item.id])) return
+    const release = writes.acquire(item.id)
+    if (!release) return
     busy.current.add(item.id)
     publish(item, 'saving')
 
@@ -231,11 +234,14 @@ export function useTopicBoard(api: ContentHubApi) {
       publish(item, error instanceof WriteReadbackError ? 'readbackFailed' : 'saveUnverified', { detail: message(error) })
     } finally {
       busy.current.delete(item.id)
+      release()
     }
   }
 
   async function abandon(item: ProductionItem) {
     if (busy.current.has(item.id) || isMutationBlocked(state.activities[item.id]) || !canAbandon(item)) return
+    const release = writes.acquire(item.id)
+    if (!release) return
     busy.current.add(item.id)
     watchers.current.delete(item.id)
     publish(item, 'abandoning')
@@ -246,8 +252,29 @@ export function useTopicBoard(api: ContentHubApi) {
       publish(item, 'abandonUnverified', { detail: message(error) })
     } finally {
       busy.current.delete(item.id)
+      release()
     }
   }
 
-  return { ...state, refresh, ensureLoaded, confirm, abandon }
+  const refreshIfLoaded = useCallback(() => {
+    if (mounted.current && loadedOnce.current) void refresh()
+  }, [refresh])
+
+  const observeWorkbenchWrite = useCallback((item: ProductionItem) => {
+    observedAt.current.set(item.id, ++sequence.current)
+    if (item.workflow_status !== confirmedStatus) watchers.current.delete(item.id)
+    setState(current => {
+      if (!current.items) return current
+      return {
+        ...current,
+        items: current.items.map(row => row.id === item.id ? item : row),
+        activities: { ...current.activities, [item.id]: observeActivity(item, current.activities[item.id]) },
+      }
+    })
+  }, [])
+
+  return {
+    ...state, refresh, refreshIfLoaded, ensureLoaded, confirm, abandon,
+    observeWorkbenchWrite, lockedIds: writes.lockedIds,
+  }
 }

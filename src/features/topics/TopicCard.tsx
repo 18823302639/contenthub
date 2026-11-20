@@ -2,6 +2,7 @@ import { ArrowUpRight, Star } from 'lucide-react'
 import { useId } from 'react'
 import { Link } from 'react-router-dom'
 import type { ProductionItem, WorkflowStatus } from '../../types/schema'
+import { externalUrl } from '../../utils/externalUrl'
 import { canAbandon, canConfirm, describeActivity, isActivityError, isMutationBlocked } from './useTopicBoard'
 import type { TopicActivity } from './useTopicBoard'
 
@@ -16,15 +17,6 @@ const statusTones: Record<WorkflowStatus, string> = {
 }
 const riskTones = { 低: 'green', 中: 'amber', 高: 'red' }
 
-function externalUrl(value: string) {
-  try {
-    const url = new URL(value)
-    return url.protocol === 'https:' || url.protocol === 'http:' ? url.href : null
-  } catch {
-    return null
-  }
-}
-
 export function TopicFeedback({ activity, hidden = false }: { activity: TopicActivity; hidden?: boolean }) {
   const error = isActivityError(activity)
   return (
@@ -36,15 +28,16 @@ export function TopicFeedback({ activity, hidden = false }: { activity: TopicAct
   )
 }
 
-export function TopicCard({ item, activity, onConfirm, onAbandon }: {
+export function TopicCard({ item, activity, writeBusy, onConfirm, onAbandon }: {
   item: ProductionItem
   activity?: TopicActivity
+  writeBusy: boolean
   onConfirm: (item: ProductionItem) => Promise<void>
   onAbandon: (item: ProductionItem) => Promise<void>
 }) {
   const headingId = useId()
   const url = externalUrl(item.url)
-  const blocked = isMutationBlocked(activity)
+  const blocked = writeBusy || isMutationBlocked(activity)
 
   return (
     <article className="topic-card" aria-labelledby={headingId}>
@@ -66,7 +59,7 @@ export function TopicCard({ item, activity, onConfirm, onAbandon }: {
       {activity && <TopicFeedback activity={activity} />}
       <div className="topic-actions">
         {item.workflow_status === '待筛选' && (
-          <button className="button button--primary" disabled={!canConfirm(item, activity)} onClick={() => void onConfirm(item)}>
+          <button className="button button--primary" disabled={blocked || !canConfirm(item, activity)} onClick={() => void onConfirm(item)}>
             确认选题
           </button>
         )}
