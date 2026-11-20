@@ -11,8 +11,8 @@ Dockerfile 使用 Node 构建 Vite 产物，最终镜像由 Nginx 提供 `dist` 
 启动 Docker Desktop，使用 Linux 容器。在下载 ZIP 的目录打开 PowerShell，执行：
 
 ```powershell
-Expand-Archive -LiteralPath .\ContentHub-final.zip -DestinationPath .\contenthub-final
-Set-Location .\contenthub-final\ContentHub
+Expand-Archive -LiteralPath .\ContentHub-mock-ui.zip -DestinationPath .\contenthub-mock-ui
+Set-Location .\contenthub-mock-ui\ContentHub
 docker build -t contenthub:mock .
 docker run --rm -d --name contenthub -p 127.0.0.1:8088:80 contenthub:mock
 Start-Process 'http://127.0.0.1:8088/'
@@ -23,8 +23,8 @@ Start-Process 'http://127.0.0.1:8088/'
 Docker Engine 启动后，在下载 ZIP 的目录执行：
 
 ```bash
-unzip ContentHub-final.zip -d contenthub-final
-cd contenthub-final/ContentHub
+unzip ContentHub-mock-ui.zip -d contenthub-mock-ui
+cd contenthub-mock-ui/ContentHub
 docker build -t contenthub:mock .
 docker run --rm -d --name contenthub -p 127.0.0.1:8088:80 contenthub:mock
 ```
@@ -46,7 +46,7 @@ docker stop contenthub
 要求 Node.js 22.13+（22 系列）或 24+，以及 npm。源码包包含锁文件。
 
 ```bash
-unzip ContentHub-final.zip
+unzip ContentHub-mock-ui.zip
 cd ContentHub
 cp .env.example .env.local
 npm ci --no-audit --no-fund
@@ -71,11 +71,11 @@ npm run preview -- --host 127.0.0.1
 - 对「待筛选」选题点击「确认选题」。界面先保存并回读「已确认-待核对」，然后调用一次 `fetch-and-draft`。收到受理回执后，以有限次数的单条读取查询回写，实际读到「AI初稿完成」时才显示初稿完成。
 - 保存回读异常时，先用「刷新列表」核对状态。状态已保存但 Webhook 受理未确认时，核对 n8n 执行记录，并刷新查看选题状态。刷新和轮询都只读，失败不会回滚已保存的状态。
 - 「放弃」保存「已放弃」并停止该条前端轮询，已发布和已放弃的选题不提供放弃按钮。Mock 不会用较迟完成的初稿覆盖已放弃状态。真实工作流须自行校验记录状态和执行标识，以避免并发写入或重复执行。前端按一次操作控制提交次数。
-- 「进入改稿台」打开 `#/workbench/:id`。
+- 「进入改稿台」打开 `#/workbench/:id`。在改稿台点击「返回选题看板」时，会恢复进入前的筛选。
 
 ## 改稿台用法
 
-- 在看板选择「进入改稿台」，也可直接打开 `#/workbench/3` 查看 Mock 初稿，或打开 `#/workbench/4` 查看已有定稿。左栏可切换原文素材与 AI 事实核查清单。
+- 在看板选择「进入改稿台」，也可直接打开 `#/workbench/3` 查看 Mock 初稿，或打开 `#/workbench/4` 查看已有定稿。左栏可切换原文素材与 AI 事实核查清单。窄屏使用工具栏的「跳到稿件」直达当前稿件视图。
 - 右栏优先显示 `final_md`，定稿为空时使用 `draft_md`。空稿可直接输入。预览支持 GFM 表格和任务清单，跳过原始 HTML，远程图片显示替代文字。复制对象始终是当前编辑区全文。
 - 「保存定稿」只写入 `final_md`。保存提交后仍可继续输入，回读保留随后输入的内容。「标记为已发布」针对已经保存的定稿，仅更新 `workflow_status` 和 `published_at`。看板与改稿台按选题共用写入锁。
 - 填写修改意见并点击「AI 去味改稿」。界面先保存 `revision_note` 与「需AI润色」，确认回读后发出一次 `rewrite-draft`。Webhook 受理后只读查询回写。若读到对应意见和「待人工终审」，改稿台才显示结果已回写。提交受理后返回看板，有限次数的查询仍可更新已打开过的看板。进入本来就处于待回写状态的记录时，改稿台也会只读跟进。

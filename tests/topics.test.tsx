@@ -61,6 +61,22 @@ describe('选题看板', () => {
     expect(screen.getAllByRole('article')).toHaveLength(5)
   })
 
+  it('从改稿台返回时保留原来的组合筛选', async () => {
+    openApp()
+    await card(retail)
+    choose('赛道', '汽车家电评测')
+    choose('最低评分', '4')
+    choose('流程状态', '待筛选')
+    fireEvent.click(within(await card(appliance)).getByRole('link', { name: '进入改稿台' }))
+    await screen.findByRole('textbox', { name: 'Markdown 编辑器' })
+    fireEvent.click(screen.getByRole('link', { name: '返回选题看板' }))
+
+    expect(screen.getByRole<HTMLSelectElement>('combobox', { name: '赛道' }).value).toBe('汽车家电评测')
+    expect(screen.getByRole<HTMLSelectElement>('combobox', { name: '最低评分' }).value).toBe('4')
+    expect(screen.getByRole<HTMLSelectElement>('combobox', { name: '流程状态' }).value).toBe('待筛选')
+    expect(screen.getAllByRole('article')).toEqual([await card(appliance)])
+  })
+
   it('先保存确认状态，再显示 Webhook 受理，最后读取初稿完成', async () => {
     const api = openApp()
     const update = vi.spyOn(api, 'updateProductionItem')

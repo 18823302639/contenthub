@@ -1,6 +1,6 @@
 import { ArrowUpRight, Star } from 'lucide-react'
 import { useId } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import type { ProductionItem, WorkflowStatus } from '../../types/schema'
 import { externalUrl } from '../../utils/externalUrl'
 import { canAbandon, canConfirm, describeActivity, isActivityError, isMutationBlocked } from './useTopicBoard'
@@ -36,6 +36,7 @@ export function TopicCard({ item, activity, writeBusy, onConfirm, onAbandon }: {
   onAbandon: (item: ProductionItem) => Promise<void>
 }) {
   const headingId = useId()
+  const { search } = useLocation()
   const url = externalUrl(item.url)
   const blocked = writeBusy || isMutationBlocked(activity)
 
@@ -63,7 +64,7 @@ export function TopicCard({ item, activity, writeBusy, onConfirm, onAbandon }: {
             确认选题
           </button>
         )}
-        <Link className="button button--secondary" to={`/workbench/${item.id}`}>进入改稿台</Link>
+        <Link className="button button--secondary" to={`/workbench/${item.id}`} state={{ topicsSearch: search }}>进入改稿台</Link>
         {canAbandon(item) && (
           <button className="button button--quiet" disabled={blocked} onClick={() => void onAbandon(item)}>放弃</button>
         )}

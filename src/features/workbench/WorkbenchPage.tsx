@@ -1,6 +1,8 @@
-import { ArrowLeft, ArrowUpRight, Clipboard, RefreshCw, Save, Sparkles } from 'lucide-react'
-import { useId, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { ArrowDown, ArrowLeft, ArrowUpRight, Clipboard, RefreshCw, Save, Sparkles } from 'lucide-react'
+import { useId, useRef, useState } from 'react'
+import type { RefObject } from 'react'
+import { Link, useLocation, useParams } from 'react-router-dom'
+import type { To } from 'react-router-dom'
 import type { RecordWrites } from '../../app/useRecordWrites'
 import type { ContentHubApi } from '../../api'
 import type { ProductionItem } from '../../types/schema'
@@ -96,7 +98,7 @@ function Sources({ record }: { record: ProductionItem }) {
   )
 }
 
-function EditorPanel({ workbench }: { workbench: ReturnType<typeof useWorkbench> }) {
+function EditorPanel({ workbench, panel }: { workbench: ReturnType<typeof useWorkbench>; panel: RefObject<HTMLElement> }) {
   const [selected, select] = useState<(typeof editorTabs)[number]['value']>('editor')
   const group = useId()
   const { doc, dirty, edit, adoptIncoming } = workbench
@@ -105,7 +107,7 @@ function EditorPanel({ workbench }: { workbench: ReturnType<typeof useWorkbench>
   const options = doc.incoming === null ? editorTabs.slice(0, 2) : editorTabs
 
   return (
-    <section className="wb-panel" aria-labelledby={`${group}-title`}>
+    <section className="wb-panel wb-draft" ref={panel} tabIndex={-1} aria-labelledby={`${group}-title`}>
       <div className="wb-panel-title">
         <h2 id={`${group}-title`}>稿件</h2>
         <span className={dirty ? 'wb-dirty' : 'wb-muted'}>{dirty ? '有未保存编辑' : doc.record.final_md?.trim() ? '定稿' : '初稿'}</span>
@@ -138,11 +140,12 @@ function EditorPanel({ workbench }: { workbench: ReturnType<typeof useWorkbench>
   )
 }
 
-function Workbench({ api, id, writes, onWrite, refreshBoard }: WorkbenchProps & { id: number }) {
+function Workbench({ api, id, writes, onWrite, refreshBoard, topicsPath }: WorkbenchProps & { id: number; topicsPath: To }) {
   const workbench = useWorkbench(api, id, writes, onWrite, refreshBoard)
   const { doc, operation, notice, copyNotice } = workbench
   const record = doc?.record
   const noteId = useId()
+  const draftPanel = useRef<HTMLElement>(null)
 
   return (
     <section aria-labelledby="workbench-heading">
@@ -152,7 +155,7 @@ function Workbench({ api, id, writes, onWrite, refreshBoard }: WorkbenchProps & 
           <p>选题记录 #{id}{record ? ` · ${record.zh_title}` : ''}</p>
         </div>
         <div className="wb-header-actions">
-          <Link className="button button--quiet" to="/topics"><ArrowLeft size={15} aria-hidden />返回选题看板</Link>
+          <Link className="button button--quiet" to={topicsPath}><ArrowLeft size={15} aria-hidden />返回选题看板</Link>
           <button className="button button--secondary" disabled={operation !== null} onClick={() => void workbench.refresh()}>
             <RefreshCw size={15} aria-hidden />刷新记录
           </button>
@@ -198,11 +201,14 @@ function Workbench({ api, id, writes, onWrite, refreshBoard }: WorkbenchProps & 
                 <time dateTime={record.published_at}>{record.published_at}</time>}
               {workbench.pending && !notice && <span>等待回写，可刷新记录查询进度。</span>}
               {!workbench.pending && workbench.dirty && <span>保存编辑后可提交 AI 改稿或登记发布。</span>}
+              <button type="button" className="button button--quiet wb-jump-to-draft" onClick={() => draftPanel.current?.focus()}>
+                <ArrowDown size={15} aria-hidden />跳到稿件
+              </button>
             </div>
           </div>
           <div className="wb-grid">
             <Sources record={record} />
-            <EditorPanel workbench={workbench} />
+            <EditorPanel workbench={workbench} panel={draftPanel} />
           </div>
         </>
       )}
@@ -212,16 +218,18 @@ function Workbench({ api, id, writes, onWrite, refreshBoard }: WorkbenchProps & 
 
 export function WorkbenchPage(props: WorkbenchProps) {
   const { id } = useParams()
+  const { state } = useLocation()
+  const topicsPath = { pathname: '/topics', search: typeof state?.topicsSearch === 'string' ? state.topicsSearch : '' }
   const recordId = Number(id)
   if (!id || !/^[1-9]\d*$/.test(id) || !Number.isSafeInteger(recordId)) {
     return (
       <section className="placeholder" aria-labelledby="invalid-workbench-heading">
         <h1 id="invalid-workbench-heading">改稿台</h1>
         <p role="alert">选题 ID 无效。</p>
-        <Link className="button button--secondary" to="/topics">返回选题看板</Link>
+        <Link className="button button--secondary" to={topicsPath}>返回选题看板</Link>
       </section>
     )
   }
 
-  return <Workbench key={recordId} {...props} id={recordId} />
+  return <Workbench key={recordId} {...props} id={recordId} topicsPath={topicsPath} />
 }

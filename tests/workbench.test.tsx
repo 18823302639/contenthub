@@ -65,6 +65,21 @@ describe('改稿台', () => {
     expect(preview.queryByRole('img')).toBeNull()
   })
 
+  it('可从工具栏定位到稿件并保持当前预览和未保存编辑', async () => {
+    mount(3)
+    const draft = await editor()
+    const unsaved = '# 未保存的合成稿件'
+    fireEvent.change(draft, { target: { value: unsaved } })
+    fireEvent.click(screen.getByRole('tab', { name: '预览' }))
+    fireEvent.click(screen.getByRole('button', { name: '跳到稿件' }))
+
+    const panel = screen.getByRole('region', { name: '稿件' })
+    expect(document.activeElement).toBe(panel)
+    expect(within(panel).getByRole('tabpanel', { name: '预览' }).textContent).toContain('未保存的合成稿件')
+    fireEvent.click(within(panel).getByRole('tab', { name: '编辑' }))
+    expect((await editor()).value).toBe(unsaved)
+  })
+
   it('复制当前全文、保存定稿，并仅登记发布状态和时间', async () => {
     const api = mount(3)
     const write = vi.spyOn(api, 'updateProductionItem')
