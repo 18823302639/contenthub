@@ -4,6 +4,7 @@ import type { ContentHubApi, WebhookRequest } from './contracts'
 import { createMockBackend } from './mockApi'
 import { createNocodbClient } from './nocodbClient'
 import { requireRecordId } from './nocodbCodec'
+import { matchesProductionFilters } from './productionFilters'
 import { createWebhookClient } from './webhookClient'
 
 export type { ContentHubEnv } from './config'
@@ -11,6 +12,7 @@ export type {
   ContentHubApi, NewAccountMetric, NewRssSource, ProductionFilters, ProductionUpdate,
   RadarFilters, WebhookAction, WebhookPayloads, WebhookReceipt,
 } from './contracts'
+export { matchesProductionFilters } from './productionFilters'
 export { ApiHttpError } from './http'
 export { WriteReadbackError } from './nocodbClient'
 
@@ -26,13 +28,9 @@ export function createContentHubApi(env: ContentHubEnv, fetcher: typeof fetch = 
 
   return {
     mode,
-    async listProductionItems({ trackTag, minScore, status } = {}) {
+    async listProductionItems(filters = {}) {
       const rows = await store.list('production_pool')
-      return rows.filter(row => (
-        (trackTag === undefined || row.track_tag === trackTag) &&
-        (minScore === undefined || row.score >= minScore) &&
-        (status === undefined || row.workflow_status === status)
-      ))
+      return rows.filter(row => matchesProductionFilters(row, filters))
     },
     getProductionItem: id => store.get('production_pool', id),
     updateProductionItem(id, changes) {

@@ -1,20 +1,20 @@
-# ContentHub 阶段 1
+# ContentHub 阶段 2
 
-ContentHub 是自媒体选题与内容生产工具。本阶段交付 React 18、TypeScript、Vite 和 Tailwind CSS 脚手架、最小启动占位、四张表的数据契约，以及可切换的离线 Mock 与真实接口适配。静态入口为 `dist/index.html`，构建使用相对资源路径。业务路由阶段优先采用 HashRouter。
+ContentHub 是自媒体选题与内容生产工具。阶段 2 提供固定侧栏、HashRouter 与选题看板，沿用阶段 1 的数据契约、Mock 模式及真实接口适配。前端使用 React 18、TypeScript、Vite、Tailwind CSS 和 lucide-react。
 
 ## 初始化与启动
 
 要求 Node.js 22.13+（22 系列）或 24+，以及 npm。源码包包含锁文件。
 
 ```bash
-unzip ContentHub-stage-1.zip
+unzip ContentHub-stage-2.zip
 cd ContentHub
 cp .env.example .env.local
 npm ci --no-audit --no-fund
 npm run dev -- --host 127.0.0.1
 ```
 
-打开终端打印的地址。默认启动占位显示「Mock · 离线演示」。首次安装依赖需要访问 npm 仓库。Mock 的业务操作在浏览器内运行，无需连接 NocoDB 或 n8n。
+打开终端打印的地址，将进入 `#/topics`。侧栏默认标明「Mock · 离线演示」。首次安装依赖需要访问 npm 仓库，Mock 操作在浏览器内完成。
 
 ```bash
 npm run typecheck
@@ -23,7 +23,16 @@ npm run build
 npm run preview -- --host 127.0.0.1
 ```
 
-生产构建生成 `dist/`，用静态 HTTP 服务提供该目录即可。本地预览命令可检查构建结果。
+生产构建生成 `dist/`，可直接交给静态 HTTP 服务。资源使用相对路径，HashRouter 使路由位于 `#` 之后，静态服务器只需提供入口与资源。
+
+## 看板用法
+
+- 可组合选择商业数据或汽车家电评测、最低评分与流程状态。筛选值写入当前哈希路由的查询参数，空结果时可一键清除。
+- 卡片显示中文标题、赛道、来源、评分、合规风险、核心数据点和原文链接。安全外链仅接受 HTTP(S)，合成样本链接使用 `.invalid`。
+- 对「待筛选」选题点击「确认选题」。界面先保存并回读「已确认-待核对」，然后调用一次 `fetch-and-draft`。收到受理回执后，以有限次数的单条读取查询回写，实际读到「AI初稿完成」时才显示初稿完成。
+- 保存回读异常时，先用「刷新列表」核对状态。状态已保存但 Webhook 受理未确认时，核对 n8n 执行记录，并刷新查看选题状态。刷新和轮询都只读，失败不会回滚已保存的状态。
+- 「放弃」保存「已放弃」并停止该条前端轮询，已发布和已放弃的选题不提供放弃按钮。Mock 不会用较迟完成的初稿覆盖已放弃状态。真实工作流须自行校验记录状态和执行标识，以避免并发写入或重复执行。前端按一次操作控制提交次数。
+- 「进入改稿台」打开 `#/workbench/:id`。改稿台、信源管理和运营数据入口仅显示后续阶段占位。
 
 ## 源码目录
 
@@ -45,14 +54,23 @@ ContentHub/
 │   │   ├── mockData.ts
 │   │   ├── nocodbClient.ts
 │   │   ├── nocodbCodec.ts
+│   │   ├── productionFilters.ts
 │   │   └── webhookClient.ts
+│   ├── app/
+│   │   └── ContentHubApp.tsx
+│   ├── features/
+│   │   └── topics/
+│   │       ├── TopicCard.tsx
+│   │       ├── TopicsPage.tsx
+│   │       └── useTopicBoard.ts
 │   ├── main.tsx
 │   ├── styles.css
 │   ├── types/
 │   │   └── schema.ts
 │   └── vite-env.d.ts
 ├── tests/
-│   └── api.test.ts
+│   ├── api.test.ts
+│   └── topics.test.tsx
 ├── tsconfig.json
 └── vite.config.ts
 ```
@@ -115,4 +133,4 @@ ContentHub/
 
 部署环境可使用现有同源反向代理，例如将基础地址设为 `/internal/nocodb/api/v2` 和 `/internal/n8n/webhook`。若代理负责注入凭证，可让浏览器的 `VITE_NOCODB_TOKEN` 使用公开标记 `proxy-managed`。代理应在完成用户鉴权和授权后覆盖客户端发送的 `xc-token`，仅放行所需表、方法及两个 Webhook 路径。可按现有设施选用身份网关、VPN 或内网访问控制。跨源 CORS 用于控制浏览器可读取响应的来源。身份校验、表和工作流的访问授权仍需独立配置。此方案由部署环境提供，本阶段只交付前端适配。
 
-阶段 1 在此验收。后续阶段在收到明确的「继续」后启动。
+阶段 2 在此验收。阶段 3 在收到明确的「继续」后启动。
