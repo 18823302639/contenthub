@@ -72,11 +72,89 @@ async function open() {
   return screen.findByRole('dialog', { name: '新增 RSS 信源' })
 }
 
+function sourceViewport(width: number) {
+  const queries = new Map<string, MediaQueryList>()
+  vi.stubGlobal('matchMedia', (query: string) => {
+    const known = queries.get(query)
+    if (known) return known
+    const result = new EventTarget() as MediaQueryList
+    const limit = Number(query.match(/max-width:\s*(\d+)px/)?.[1])
+    Object.defineProperties(result, {
+      media: { value: query },
+      matches: { get: () => width <= limit },
+    })
+    queries.set(query, result)
+    return result
+  })
+  return (next: number) => act(() => {
+    width = next
+    for (const result of queries.values()) result.dispatchEvent(new Event('change'))
+  })
+}
+
 describe('RSS 信源管理', () => {
+  it('在桌面和手机间切换时每条信源只保留一个可操作的开关', async () => {
+    const resize = sourceViewport(1440)
+    mount()
+    const desktop = within(await source(retail))
+    expect(screen.getByRole('table', { name: 'RSS 信源' })).toBeTruthy()
+    desktop.getByRole('switch').focus()
+    resize(390)
+    const list = screen.getByRole('list', { name: 'RSS 信源' })
+    expect(screen.queryByRole('table')).toBeNull()
+    const items = within(list).getAllByRole('listitem')
+    expect(items).toHaveLength(3)
+    const item = within(items[0])
+    expect(item.getByRole('heading', { name: retail })).toBeTruthy()
+    expect(item.getByText('生产池')).toBeTruthy()
+    expect(item.getByText('商业数据')).toBeTruthy()
+    expect(item.getByRole('link').getAttribute('href')).toBe('https://retail.example.invalid/feed.xml')
+    expect(item.getByText('已启用')).toBeTruthy()
+    expect(screen.getAllByRole('switch', { name: '启用 ' + retail })).toHaveLength(1)
+    expect(document.activeElement).toBe(item.getByRole('switch'))
+    item.getByRole('link').focus()
+    resize(1440)
+    expect(screen.queryByRole('list', { name: 'RSS 信源' })).toBeNull()
+    expect(screen.getAllByRole('switch', { name: '启用 ' + retail })).toHaveLength(1)
+    expect(document.activeElement).toBe(within(await source(retail)).getByRole('link'))
+  })
+
+  it('手机开关在回读失败前后保留焦点，阻止重复写入并容许刷新核对', async () => {
+    sourceViewport(390)
+    const api = createContentHubApi({})
+    const write = api.setRssSourceActive
+    const update = vi.spyOn(api, 'setRssSourceActive').mockImplementationOnce(async (id, active) => {
+      await write(id, active)
+      throw new WriteReadbackError('rss_sources', id, new Error('回读中断'))
+    })
+    mount(api)
+    const list = await screen.findByRole('list', { name: 'RSS 信源' })
+    const control = within(list).getByRole('switch', { name: '启用 ' + retail })
+    const user = userEvent.setup()
+    control.focus()
+    await user.keyboard(' ')
+    expect(control.getAttribute('aria-disabled')).toBe('true')
+    expect(control.getAttribute('aria-checked')).toBe('true')
+    await user.keyboard('{Enter}')
+    const failure = await within(list).findByRole('alert')
+    expect(failure.textContent).toMatch(/刷新/)
+    expect(control.getAttribute('aria-describedby')).toBe(failure.id)
+    expect(document.activeElement).toBe(control)
+    expect(update).toHaveBeenCalledExactlyOnceWith(1, false)
+    press('刷新信源')
+    await waitFor(() => expect(control.getAttribute('aria-checked')).toBe('false'))
+    expect(control.getAttribute('aria-disabled')).toBe('false')
+    expect(within(list).queryByRole('alert')).toBeNull()
+    expect(update).toHaveBeenCalledTimes(1)
+  })
+
   it('在加载后显示真实 Mock 行，可切换全部、生产池和雷达池', async () => {
     const transport = vi.fn<typeof fetch>()
     const api = mount(createContentHubApi({}, transport))
     expect(screen.getByText('正在加载信源…')).toBeTruthy()
+    const add = screen.getByRole<HTMLButtonElement>('button', { name: '新增信源' })
+    expect(add.disabled).toBe(true)
+    expect(add.getAttribute('aria-disabled')).toBeNull()
     const row = within(await source(retail))
     expect(row.getByText('商业数据')).toBeTruthy()
     expect(row.getByRole('link').getAttribute('href')).toBe('https://retail.example.invalid/feed.xml')
@@ -320,7 +398,8 @@ describe('RSS 信源管理', () => {
     expect(screen.queryByRole('dialog')).toBeNull()
     await act(async () => finish(verifiedRows))
     await source(newName)
-    expect(opener.getAttribute('aria-disabled')).toBe('false')
+    expect(opener.getAttribute('aria-disabled')).not.toBe('true')
+    expect((opener as HTMLButtonElement).disabled).toBe(false)
   })
 
   it('保存期间允许关闭弹窗，后台写入失败仍在页面反馈', async () => {
@@ -340,7 +419,8 @@ describe('RSS 信源管理', () => {
     await act(async () => reject(new ApiHttpError('NocoDB', 422)))
     expect(screen.getByText(/保存信源失败/)).toBeTruthy()
     expect(create).toHaveBeenCalledTimes(1)
-    expect(opener.getAttribute('aria-disabled')).toBe('false')
+    expect(opener.getAttribute('aria-disabled')).not.toBe('true')
+    expect((opener as HTMLButtonElement).disabled).toBe(false)
   })
 
   it('回读状态不一致时以实际状态为准，避免成功误报', async () => {

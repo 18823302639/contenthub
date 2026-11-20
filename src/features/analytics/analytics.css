@@ -1,5 +1,4 @@
 /* 延续工作区的表格、按钮与状态色。 */
-.analytics-actions, .analytics-actions .button[aria-disabled='true'] { cursor: not-allowed; opacity: .55; }
 .analytics-controls { display: flex; flex-wrap: wrap; gap: 8px; }
 .analytics-controls { justify-content: space-between; margin-bottom: 8px; }
 .analytics-range, .analytics-muted, .metric-coverage { color: var(--muted); font-size: 12px; }

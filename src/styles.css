@@ -114,6 +114,7 @@ body { min-width: 320px; }
 .page-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
 .page-header h1, .placeholder h1, .startup-error h1 { font-size: 28px; font-weight: 740; line-height: 1.25; letter-spacing: -.035em; }
 .page-header p { margin-top: 7px; color: var(--muted); font-size: 13px; }
+.page-actions { display: flex; flex-wrap: wrap; gap: 7px; flex: 0 1 auto; }
 .refresh-button { flex: none; }
 .refresh-spinning { animation: refresh-spin 1s linear infinite; }
 @keyframes refresh-spin { to { transform: rotate(360deg); } }
@@ -133,13 +134,13 @@ body { min-width: 320px; }
   line-height: 1.2;
   white-space: nowrap;
 }
-.button:disabled { cursor: not-allowed; opacity: .55; }
+.button:disabled, .button[aria-disabled='true'] { cursor: not-allowed; opacity: .55; }
 .button--primary { background: var(--accent); color: #fff; }
-.button--primary:hover:not(:disabled) { background: var(--accent-hover); }
+.button--primary:hover:not(:disabled, [aria-disabled='true']) { background: var(--accent-hover); }
 .button--secondary { border-color: var(--line); background: var(--surface); color: var(--ink); }
-.button--secondary:hover:not(:disabled) { border-color: #cbd0df; background: #f6f7fc; }
+.button--secondary:hover:not(:disabled, [aria-disabled='true']) { border-color: #cbd0df; background: #f6f7fc; }
 .button--quiet { color: var(--muted); }
-.button--quiet:hover:not(:disabled) { background: #eceef5; color: var(--ink); }
+.button--quiet:hover:not(:disabled, [aria-disabled='true']) { background: #eceef5; color: var(--ink); }
 
 .filters {
   display: flex;

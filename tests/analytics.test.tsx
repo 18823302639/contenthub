@@ -67,6 +67,24 @@ function save(dialog: HTMLElement) {
 }
 
 describe('运营数据复盘', () => {
+  it('修正运营表单的一个字段时清除对应旧错误，保留其他字段的提示', async () => {
+    const api = mount()
+    const saveMetric = vi.spyOn(api, 'createAccountMetric')
+    const dialog = await openEntry()
+    const fields = within(dialog)
+    const article = fields.getByLabelText('已发布内容')
+    const impressions = fields.getByLabelText('新增展现量')
+    save(dialog)
+    expect(document.activeElement).toBe(article)
+    expect(article.getAttribute('aria-invalid')).toBe('true')
+    expect(impressions.getAttribute('aria-invalid')).toBe('true')
+    change(dialog, '已发布内容', '5')
+    expect(article.getAttribute('aria-invalid')).toBe('false')
+    expect(fields.queryByText('请选择已发布内容。')).toBeNull()
+    expect(impressions.getAttribute('aria-invalid')).toBe('true')
+    expect(saveMetric).not.toHaveBeenCalled()
+  })
+
   it('默认按公众号看近 7 天，可切至 30 天或其他平台，雷达严格取双阈值', async () => {
     const network = vi.fn<typeof fetch>()
     const api = createContentHubApi({}, network)

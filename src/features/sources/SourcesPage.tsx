@@ -1,5 +1,5 @@
 import { ArrowUpRight, Inbox, Plus, RefreshCw } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import type { NewRssSource } from '../../api'
 import { poolTypes } from '../../types/schema'
@@ -10,6 +10,115 @@ import type { useSources } from './useSources'
 import './sources.css'
 
 type SourcesModel = ReturnType<typeof useSources>
+
+const compactSourcesQuery = '(max-width: 960px)'
+
+function compactSourceLayout() {
+  return window.matchMedia?.(compactSourcesQuery).matches ?? false
+}
+
+function SourceEntry({ row, compact, model }: { row: RssSource; compact: boolean; model: SourcesModel }) {
+  const feedbackId = useId()
+  const url = rssUrl(row.rss_url)
+  const feedback = model.rowFeedback[row.id]
+  const unavailable = model.loading || feedback?.kind === 'saving' || feedback?.kind === 'unverified'
+  const group = (
+    <span className={row.pool_type === 'production' ? 'pill pill--violet' : 'pill pill--neutral'}>
+      {poolLabels[row.pool_type]}
+    </span>
+  )
+  const link = url ? (
+    <a className="source-link" href={url} target="_blank" rel="noopener noreferrer" title={url} data-source-control={'link-' + row.id}>
+      <span>{url}</span><ArrowUpRight size={14} aria-hidden />
+    </a>
+  ) : <span className="source-invalid">链接无效</span>
+  const control = (
+    <button type="button" className="source-switch" role="switch" aria-label={'启用 ' + row.name}
+      data-source-control={'switch-' + row.id}
+      aria-checked={row.is_active} aria-disabled={unavailable} aria-describedby={feedback ? feedbackId : undefined}
+      onClick={() => { if (!unavailable) void model.toggle(row) }}>
+      <span className="source-switch-track" aria-hidden><span /></span>
+      <span>{row.is_active ? '已启用' : '已停用'}</span>
+    </button>
+  )
+  const notice = feedback && (
+    <p id={feedbackId} className={feedback.kind === 'saving' ? 'source-row-note' : 'source-row-error'}
+      role={feedback.kind === 'saving' ? 'status' : 'alert'}>
+      {feedback.message}
+    </p>
+  )
+
+  if (compact) {
+    return (
+      <li className="source-card">
+        <div className="source-card-header">
+          <h2>{row.name}</h2>
+          {control}
+        </div>
+        {notice}
+        <div className="source-card-meta">{group}<span>{row.track_tag}</span></div>
+        {link}
+      </li>
+    )
+  }
+
+  return (
+    <tr>
+      <th scope="row">{row.name}</th>
+      <td>{group}</td>
+      <td>{row.track_tag}</td>
+      <td>{link}</td>
+      <td>{control}{notice}</td>
+    </tr>
+  )
+}
+
+function SourceEntries({ rows, model }: { rows: RssSource[]; model: SourcesModel }) {
+  const container = useRef<HTMLDivElement>(null)
+  const restoreFocus = useRef<string>()
+  const [compact, setCompact] = useState(compactSourceLayout)
+
+  useLayoutEffect(() => {
+    const query = window.matchMedia?.(compactSourcesQuery)
+    if (!query) return
+    const changeLayout = () => {
+      const active = document.activeElement
+      restoreFocus.current = active instanceof HTMLElement && container.current?.contains(active)
+        ? active.dataset.sourceControl
+        : undefined
+      setCompact(query.matches)
+    }
+    query.addEventListener('change', changeLayout)
+    changeLayout()
+    return () => query.removeEventListener('change', changeLayout)
+  }, [])
+
+  useLayoutEffect(() => {
+    const control = restoreFocus.current
+    restoreFocus.current = undefined
+    if (control) container.current?.querySelector<HTMLElement>(`[data-source-control="${control}"]`)?.focus()
+  }, [compact])
+
+  const entries = rows.map(row => <SourceEntry key={row.id} row={row} compact={compact} model={model} />)
+  if (compact) return <div ref={container}><ul className="source-card-list" role="list" aria-label="RSS 信源">{entries}</ul></div>
+
+  return (
+    <div ref={container} className="source-table-wrap" tabIndex={0} aria-label="RSS 信源表格" role="region">
+      <table className="source-table" aria-label="RSS 信源">
+        <thead>
+          <tr>
+            <th scope="col">信源名称</th>
+            <th scope="col">分组</th>
+            <th scope="col">赛道</th>
+            <th scope="col">RSS 链接</th>
+            <th scope="col">启用状态</th>
+          </tr>
+        </thead>
+        <tbody>{entries}</tbody>
+      </table>
+    </div>
+  )
+}
 
 export function SourcesPage({ model }: { model: SourcesModel }) {
   const { ensureLoaded, rows, loading, loadError, refresh, notice } = model
@@ -71,11 +180,11 @@ export function SourcesPage({ model }: { model: SourcesModel }) {
           <h1 id="sources-title">信源管理</h1>
           <p>维护生产池和雷达池的 RSS 信源。</p>
         </div>
-        <div className="sources-actions">
+        <div className="page-actions">
           <button className="button button--secondary" onClick={() => void refresh()} disabled={loading || model.writing}>
             <RefreshCw size={15} className={loading ? 'refresh-spinning' : undefined} aria-hidden />刷新信源
           </button>
-          <button className="button button--primary" ref={opener} disabled={!rows} aria-disabled={dialogBusy}
+          <button className="button button--primary" ref={opener} disabled={!rows} aria-disabled={dialogBusy || undefined}
             onClick={() => { if (!dialogBusy) openDialog() }}>
             <Plus size={16} aria-hidden />新增信源
           </button>
@@ -114,56 +223,7 @@ export function SourcesPage({ model }: { model: SourcesModel }) {
           <>
             <p className="results-count" role="status">{filtered.length} 条信源</p>
             {filtered.length > 0 ? (
-              <div className="source-table-wrap" tabIndex={0} aria-label="RSS 信源表格" role="region">
-                <table className="source-table" aria-label="RSS 信源">
-                  <thead>
-                    <tr>
-                      <th scope="col">信源名称</th>
-                      <th scope="col">分组</th>
-                      <th scope="col">赛道</th>
-                      <th scope="col">RSS 链接</th>
-                      <th scope="col">启用状态</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filtered.map(row => {
-                      const url = rssUrl(row.rss_url)
-                      const feedback = model.rowFeedback[row.id]
-                      const unavailable = loading || feedback?.kind === 'saving' || feedback?.kind === 'unverified'
-                      return (
-                        <tr key={row.id}>
-                          <th scope="row">{row.name}</th>
-                          <td><span className={row.pool_type === 'production' ? 'pill pill--violet' : 'pill pill--neutral'}>
-                            {poolLabels[row.pool_type]}
-                          </span></td>
-                          <td>{row.track_tag}</td>
-                          <td>
-                            {url ? (
-                              <a className="source-link" href={url} target="_blank" rel="noopener noreferrer" title={url}>
-                                <span>{url}</span><ArrowUpRight size={14} aria-hidden />
-                              </a>
-                            ) : <span className="source-invalid">链接无效</span>}
-                          </td>
-                          <td>
-                            <button type="button" className="source-switch" role="switch" aria-label={'启用 ' + row.name}
-                              aria-checked={row.is_active} aria-disabled={unavailable}
-                              onClick={() => { if (!unavailable) void model.toggle(row) }}>
-                              <span className="source-switch-track" aria-hidden><span /></span>
-                              <span>{row.is_active ? '已启用' : '已停用'}</span>
-                            </button>
-                            {feedback && (
-                              <p className={feedback.kind === 'saving' ? 'source-row-note' : 'source-row-error'}
-                                role={feedback.kind === 'saving' ? 'status' : 'alert'}>
-                                {feedback.message}
-                              </p>
-                            )}
-                          </td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
+              <SourceEntries rows={filtered} model={model} />
             ) : (
               <div className="empty-state">
                 <Inbox size={24} strokeWidth={1.6} aria-hidden />

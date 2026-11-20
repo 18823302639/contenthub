@@ -127,11 +127,11 @@ export function AnalyticsPage({ model }: { model: AnalyticsModel }) {
           <h1 id="analytics-title">运营数据</h1>
           <p>按平台复盘单日新增，查看雷达机会。</p>
         </div>
-        <div className="analytics-actions">
+        <div className="page-actions">
           <button className="button button--secondary" disabled={loading || operation !== null} onClick={() => void refresh()}>
             <RefreshCw size={15} className={loading ? 'refresh-spinning' : undefined} aria-hidden />刷新数据
           </button>
-          <button className="button button--primary" disabled={!articles.rows?.length || loading} aria-disabled={operation !== null}
+          <button className="button button--primary" disabled={!articles.rows?.length || loading} aria-disabled={operation !== null || undefined}
             ref={opener} onClick={() => { if (operation === null) openDialog() }}>
             <Plus size={16} aria-hidden />录入运营数据
           </button>

@@ -93,6 +93,9 @@ export function AddMetricDialog({
     return {
       id: uid + '-' + key, name: key, required: true, 'aria-invalid': Boolean(errors[key]),
       'aria-describedby': errors[key] ? uid + '-error-' + key : undefined,
+      onChange: () => {
+        if (errors[key]) setErrors(current => ({ ...current, [key]: '' }))
+      },
     }
   }
 

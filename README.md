@@ -11,8 +11,8 @@ Dockerfile 使用 Node 构建 Vite 产物，最终镜像由 Nginx 提供 `dist` 
 启动 Docker Desktop，使用 Linux 容器。在下载 ZIP 的目录打开 PowerShell，执行：
 
 ```powershell
-Expand-Archive -LiteralPath .\ContentHub-mock-ui.zip -DestinationPath .\contenthub-mock-ui
-Set-Location .\contenthub-mock-ui\ContentHub
+Expand-Archive -LiteralPath .\ContentHub-responsive-ui.zip -DestinationPath .\contenthub-responsive-ui
+Set-Location .\contenthub-responsive-ui\ContentHub
 docker build -t contenthub:mock .
 docker run --rm -d --name contenthub -p 127.0.0.1:8088:80 contenthub:mock
 Start-Process 'http://127.0.0.1:8088/'
@@ -23,8 +23,8 @@ Start-Process 'http://127.0.0.1:8088/'
 Docker Engine 启动后，在下载 ZIP 的目录执行：
 
 ```bash
-unzip ContentHub-mock-ui.zip -d contenthub-mock-ui
-cd contenthub-mock-ui/ContentHub
+unzip ContentHub-responsive-ui.zip -d contenthub-responsive-ui
+cd contenthub-responsive-ui/ContentHub
 docker build -t contenthub:mock .
 docker run --rm -d --name contenthub -p 127.0.0.1:8088:80 contenthub:mock
 ```
@@ -46,7 +46,7 @@ docker stop contenthub
 要求 Node.js 22.13+（22 系列）或 24+，以及 npm。源码包包含锁文件。
 
 ```bash
-unzip ContentHub-mock-ui.zip
+unzip ContentHub-responsive-ui.zip
 cd ContentHub
 cp .env.example .env.local
 npm ci --no-audit --no-fund
@@ -84,7 +84,7 @@ npm run preview -- --host 127.0.0.1
 
 ## RSS 信源管理
 
-- 左侧选择「信源管理」进入 `#/sources`。列表按全部、生产池、雷达池筛选，显示信源名称、分组、赛道、RSS 链接及启用状态。窄屏可横向滚动表格。
+- 左侧选择「信源管理」进入 `#/sources`。列表按全部、生产池、雷达池筛选，显示信源名称、分组、赛道、RSS 链接及启用状态。宽屏显示表格，窄屏显示信源列表。列表中每条信源的名称和启停开关位于顶部。
 - 使用开关切换启停。键盘聚焦后按空格或 Enter 即可操作。列表使用实际回读状态，当前信源保存时会阻止重复操作。启停结果未确认时先刷新核对。
 - 「新增信源」打开弹窗，填写名称、完整的 HTTP(S) RSS 链接、赛道与分组，并选择是否立即启用。打开时默认沿用所选分组，全部视图中默认选生产池。表单校验链接格式，页面只管理信源记录。
 - 新增结果未确认时，使用「核对列表」查询。优先根据已有回执 ID 核对，再以列表中实际读到的字段为准。若一次查询未找到记录，可稍后继续核对。同一应用实例内，同分组、同链接的待核实新增不会再次提交。可选择「新增其他信源」暂存核对并继续录入。服务明确拒绝输入时，表单保留内容，修正后可重试。关闭弹窗后仍可在页面看到后台保存结果。
