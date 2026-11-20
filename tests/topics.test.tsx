@@ -192,13 +192,13 @@ describe('选题看板', () => {
     expect(screen.queryByText('读取测试错误')).toBeNull()
   })
 
-  it('信源和运营入口标明尚未开放，未知路由可回到看板', async () => {
+  it('可进入信源，运营入口保持占位，未知路由可回到看板', async () => {
     openApp(createContentHubApi({}), '/not-found')
     expect(screen.getByRole('heading', { name: '页面不存在' })).toBeTruthy()
     const nav = within(screen.getByRole('navigation', { name: '主导航' }))
     fireEvent.click(nav.getByRole('link', { name: '信源管理' }))
     expect(screen.getByRole('heading', { name: '信源管理' })).toBeTruthy()
-    expect(screen.getByText('阶段 4 开放')).toBeTruthy()
+    expect(await screen.findByRole('table', { name: 'RSS 信源' })).toBeTruthy()
     fireEvent.click(nav.getByRole('link', { name: '运营数据' }))
     expect(screen.getByRole('heading', { name: '运营数据' })).toBeTruthy()
     expect(screen.getByText('阶段 5 开放')).toBeTruthy()

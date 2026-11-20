@@ -1,0 +1,116 @@
+/* 信源管理沿用工作区的边框、状态色和按钮。 */
+.sources-actions { display: flex; flex-wrap: wrap; gap: 7px; flex: none; }
+.sources-actions .button[aria-disabled='true'] { cursor: not-allowed; opacity: .55; }
+.sources-filters { display: flex; flex-wrap: wrap; gap: 5px; }
+.sources-filters button { min-height: 32px; }
+.sources-filters button[aria-pressed='true'] { background: #eae7fb; color: #4937ac; }
+.sources-notice { margin-top: 12px; }
+.source-loading { margin-top: 16px; color: var(--muted); font-size: 13px; }
+
+.source-table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--surface);
+}
+.source-table {
+  width: 100%;
+  min-width: 670px;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 13px;
+}
+.source-table th, .source-table td { padding: 12px 14px; vertical-align: middle; }
+.source-table thead { background: #f5f6fb; color: var(--muted); }
+.source-table thead th { font-size: 12px; font-weight: 660; white-space: nowrap; }
+.source-table tbody tr { border-top: 1px solid var(--line); }
+.source-table tbody th { min-width: 145px; font-weight: 650; overflow-wrap: anywhere; }
+.source-table tbody td:nth-child(3) { min-width: 104px; overflow-wrap: anywhere; }
+.source-table tbody td:last-child { width: 210px; min-width: 127px; }
+.source-link {
+  display: inline-flex;
+  max-width: clamp(160px, 27vw, 370px);
+  align-items: center;
+  gap: 4px;
+  color: var(--accent);
+  font-size: 12px;
+}
+.source-link span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.source-link svg { flex: none; }
+.source-link:hover { text-decoration: underline; text-underline-offset: 3px; }
+.source-invalid, .source-row-note, .source-row-error { color: var(--muted); font-size: 11px; }
+.source-row-note, .source-row-error { margin-top: 4px; overflow-wrap: anywhere; }
+.source-row-error { color: #774509; }
+
+.source-switch {
+  display: inline-flex;
+  min-height: 31px;
+  align-items: center;
+  gap: 7px;
+  border-radius: 6px;
+  padding: 0 3px;
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.source-switch[aria-disabled='true'] { cursor: not-allowed; opacity: .66; }
+.source-switch-track {
+  display: flex;
+  width: 31px;
+  height: 18px;
+  align-items: center;
+  border-radius: 20px;
+  background: #778199;
+  padding: 2px;
+}
+.source-switch-track > span { width: 14px; height: 14px; border-radius: 50%; background: #fff; }
+.source-switch[aria-checked='true'] .source-switch-track { justify-content: end; background: var(--accent); }
+.source-switch[aria-checked='true'] { color: var(--ink); }
+
+.source-dialog {
+  inset: 0;
+  width: min(460px, calc(100vw - 28px));
+  max-height: calc(100dvh - 28px);
+  margin: auto;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 0 18px 54px #22233d2e;
+}
+.source-dialog::backdrop { background: #1c223477; }
+.source-dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--line);
+  padding: 12px 16px;
+}
+.source-dialog-header h2 { font-size: 17px; font-weight: 700; }
+.source-dialog-close { width: 35px; padding: 0; }
+.source-form { display: grid; gap: 12px; padding: 15px 16px; }
+.source-form fieldset { display: grid; gap: 12px; }
+.source-field { display: grid; gap: 5px; }
+.source-field label { color: var(--muted); font-size: 12px; font-weight: 670; }
+.source-field input, .source-field select {
+  width: 100%;
+  min-height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fbfbfe;
+  padding: 0 9px;
+  font-size: 13px;
+}
+.source-field input[aria-invalid='true'] { border-color: #ad4753; }
+.source-field-error { color: #922d3a; font-size: 12px; }
+.source-activation { display: inline-flex; align-items: center; justify-self: start; gap: 7px; font-size: 13px; }
+.source-activation input { accent-color: var(--accent); }
+.source-dialog-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }
+
+@media (max-width: 760px) {
+  .sources-actions { flex-shrink: 1; }
+}

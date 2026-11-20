@@ -1,0 +1,189 @@
+import { ArrowUpRight, Inbox, Plus, RefreshCw } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
+import type { NewRssSource } from '../../api'
+import { poolTypes } from '../../types/schema'
+import type { PoolType, RssSource } from '../../types/schema'
+import { AddSourceDialog } from './AddSourceDialog'
+import { poolLabels, rssUrl } from './sourceFields'
+import type { useSources } from './useSources'
+import './sources.css'
+
+type SourcesModel = ReturnType<typeof useSources>
+
+export function SourcesPage({ model }: { model: SourcesModel }) {
+  const { ensureLoaded, rows, loading, loadError, refresh, notice } = model
+  const [query, setQuery] = useSearchParams()
+  const [dialogId, setDialogId] = useState<number | null>(null)
+  const activeDialog = useRef<number | null>(null)
+  const dialogSequence = useRef(0)
+  const opener = useRef<HTMLButtonElement>(null)
+  const visible = useRef(true)
+  const pool = poolTypes.find(option => option === query.get('pool'))
+  const filtered = (rows ?? []).filter(row => !pool || row.pool_type === pool)
+  const dialogBusy = model.savingCreate || model.checkingCreate
+
+  useEffect(() => {
+    visible.current = true
+    ensureLoaded()
+    return () => { visible.current = false }
+  }, [ensureLoaded])
+
+  function choose(filter?: PoolType) {
+    const next = new URLSearchParams(query)
+    if (filter) next.set('pool', filter)
+    else next.delete('pool')
+    setQuery(next, { replace: true })
+  }
+
+  function openDialog() {
+    model.clearCreateError()
+    const next = ++dialogSequence.current
+    activeDialog.current = next
+    setDialogId(next)
+  }
+
+  function closeDialog() {
+    activeDialog.current = null
+    setDialogId(null)
+  }
+
+  function saved(source: RssSource | null, requestDialog: number | null) {
+    if (!source || !visible.current || requestDialog !== activeDialog.current) return
+    if (pool && pool !== source.pool_type) choose(source.pool_type)
+    closeDialog()
+  }
+
+  async function save(input: NewRssSource) {
+    const requestDialog = activeDialog.current
+    saved(await model.create(input), requestDialog)
+  }
+
+  async function check() {
+    const requestDialog = activeDialog.current
+    saved(await model.verifyCreation(), requestDialog)
+  }
+
+  return (
+    <section aria-labelledby="sources-title">
+      <header className="page-header">
+        <div>
+          <h1 id="sources-title">信源管理</h1>
+          <p>维护生产池和雷达池的 RSS 信源。</p>
+        </div>
+        <div className="sources-actions">
+          <button className="button button--secondary" onClick={() => void refresh()} disabled={loading || model.writing}>
+            <RefreshCw size={15} className={loading ? 'refresh-spinning' : undefined} aria-hidden />刷新信源
+          </button>
+          <button className="button button--primary" ref={opener} disabled={!rows} aria-disabled={dialogBusy}
+            onClick={() => { if (!dialogBusy) openDialog() }}>
+            <Plus size={16} aria-hidden />新增信源
+          </button>
+        </div>
+      </header>
+
+      <div className="sources-filters" role="group" aria-label="按分组筛选">
+        <button className="button button--quiet" aria-pressed={!pool} onClick={() => choose()}>全部</button>
+        {poolTypes.map(option => (
+          <button className="button button--quiet" key={option} aria-pressed={pool === option} onClick={() => choose(option)}>
+            {poolLabels[option]}
+          </button>
+        ))}
+      </div>
+      {loadError && (
+        <div className="read-error" role="alert">
+          <strong>{rows ? '刷新失败，以下为上次读取的信源。' : '信源加载失败。'}</strong>
+          <span>{loadError}</span>
+        </div>
+      )}
+      {notice && <p className="topic-feedback sources-notice" role="status">{notice}</p>}
+      {dialogId === null && dialogBusy && (
+        <p className="topic-feedback sources-notice" role="status">
+          {model.savingCreate ? '正在保存信源…' : '正在核对列表…'}
+        </p>
+      )}
+      {dialogId === null && model.createError && (
+        <p className="topic-feedback topic-feedback--warning sources-notice" role="alert">
+          {model.createError}{model.pendingInput && '打开「新增信源」可继续核对。'}
+        </p>
+      )}
+
+      <div aria-busy={loading}>
+        {!rows && loading && <p className="source-loading" role="status">正在加载信源…</p>}
+        {rows && (
+          <>
+            <p className="results-count" role="status">{filtered.length} 条信源</p>
+            {filtered.length > 0 ? (
+              <div className="source-table-wrap" tabIndex={0} aria-label="RSS 信源表格" role="region">
+                <table className="source-table" aria-label="RSS 信源">
+                  <thead>
+                    <tr>
+                      <th scope="col">信源名称</th>
+                      <th scope="col">分组</th>
+                      <th scope="col">赛道</th>
+                      <th scope="col">RSS 链接</th>
+                      <th scope="col">启用状态</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filtered.map(row => {
+                      const url = rssUrl(row.rss_url)
+                      const feedback = model.rowFeedback[row.id]
+                      const unavailable = loading || feedback?.kind === 'saving' || feedback?.kind === 'unverified'
+                      return (
+                        <tr key={row.id}>
+                          <th scope="row">{row.name}</th>
+                          <td><span className={row.pool_type === 'production' ? 'pill pill--violet' : 'pill pill--neutral'}>
+                            {poolLabels[row.pool_type]}
+                          </span></td>
+                          <td>{row.track_tag}</td>
+                          <td>
+                            {url ? (
+                              <a className="source-link" href={url} target="_blank" rel="noopener noreferrer" title={url}>
+                                <span>{url}</span><ArrowUpRight size={14} aria-hidden />
+                              </a>
+                            ) : <span className="source-invalid">链接无效</span>}
+                          </td>
+                          <td>
+                            <button type="button" className="source-switch" role="switch" aria-label={'启用 ' + row.name}
+                              aria-checked={row.is_active} aria-disabled={unavailable}
+                              onClick={() => { if (!unavailable) void model.toggle(row) }}>
+                              <span className="source-switch-track" aria-hidden><span /></span>
+                              <span>{row.is_active ? '已启用' : '已停用'}</span>
+                            </button>
+                            {feedback && (
+                              <p className={feedback.kind === 'saving' ? 'source-row-note' : 'source-row-error'}
+                                role={feedback.kind === 'saving' ? 'status' : 'alert'}>
+                                {feedback.message}
+                              </p>
+                            )}
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="empty-state">
+                <Inbox size={24} strokeWidth={1.6} aria-hidden />
+                <h2>{pool ? '当前分组暂无信源。' : '暂无信源。'}</h2>
+                {pool && <button className="button button--secondary" onClick={() => choose()}>查看全部信源</button>}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
+      {dialogId !== null && (
+        <AddSourceDialog
+          key={dialogId}
+          opener={opener} defaultPool={pool ?? 'production'} pendingInput={model.pendingInput} error={model.createError}
+          saving={model.savingCreate} checking={model.checkingCreate} unavailable={loading} mayCheck={!loading && !model.writing}
+          onCancel={closeDialog} onSave={save} onCheck={check}
+          onOtherSource={() => { model.deferCreation(); openDialog() }}
+        />
+      )}
+    </section>
+  )
+}

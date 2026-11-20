@@ -1,6 +1,8 @@
 import { ArrowLeft, ChartNoAxesCombined, ChevronRight, Layers3, LayoutGrid, Rss, SquarePen } from 'lucide-react'
 import { Link, Navigate, NavLink, Route, Routes, useLocation } from 'react-router-dom'
 import type { ContentHubApi } from '../api'
+import { SourcesPage } from '../features/sources/SourcesPage'
+import { useSources } from '../features/sources/useSources'
 import { TopicsPage } from '../features/topics/TopicsPage'
 import { useRecordWrites } from './useRecordWrites'
 import { WorkbenchPage } from '../features/workbench/WorkbenchPage'
@@ -27,6 +29,7 @@ function Placeholder({ title, text, phase }: { title: string; text: string; phas
 export function ContentHubApp({ api }: { api: ContentHubApi }) {
   const writes = useRecordWrites()
   const board = useTopicBoard(api, writes)
+  const sources = useSources(api)
   const { pathname } = useLocation()
   const active = links.find(link => pathname === link.to || pathname.startsWith(link.to + '/'))
   const mode = api.mode === 'mock' ? 'Mock · 离线演示' : '真实数据模式'
@@ -70,7 +73,7 @@ export function ContentHubApp({ api }: { api: ContentHubApi }) {
             <Route path="/topics" element={<TopicsPage board={board} />} />
             <Route path="/workbench" element={<Placeholder title="改稿台" text="从选题看板选择一条选题进入改稿台。" />} />
             <Route path="/workbench/:id" element={<WorkbenchPage api={api} writes={writes} onWrite={board.observeWorkbenchWrite} refreshBoard={board.refreshIfLoaded} />} />
-            <Route path="/sources" element={<Placeholder title="信源管理" text="在这里管理生产池和雷达池的 RSS 信源。" phase={4} />} />
+            <Route path="/sources" element={<SourcesPage model={sources} />} />
             <Route path="/analytics" element={<Placeholder title="运营数据" text="在这里查看账号指标和雷达机会。" phase={5} />} />
             <Route path="*" element={<Placeholder title="页面不存在" text="请通过左侧导航打开工作区页面。" />} />
           </Routes>
