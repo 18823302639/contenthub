@@ -35,20 +35,21 @@ afterEach(() => {
 })
 
 describe('改稿台', () => {
-  it('提交所选画幅和音色，等待任务 ID 后显示编码正确的新标签页下载链接', async () => {
+  it('提交所选画幅和音色，原样显示当前任务的签名下载链接', async () => {
     const record = await createContentHubApi({}).getProductionItem(3)
     let finishVideo!: (response: Response) => void
     const pending = new Promise<Response>(resolve => { finishVideo = resolve })
+    const videoReceipt = vi.fn<() => Promise<Response>>()
+      .mockReturnValueOnce(pending)
+      .mockResolvedValueOnce(Response.json({ jobId: 'video-next' }, { status: 202 }))
     const fetcher = vi.fn<typeof fetch>().mockImplementation(async (_url, options) =>
-      options?.method === 'POST' ? pending : Response.json(record))
+      options?.method === 'POST' ? videoReceipt() : Response.json(record))
     const api = createContentHubApi({
       VITE_USE_MOCK: 'false',
       VITE_NOCODB_API_URL: '/nocodb',
       VITE_NOCODB_TOKEN: 'test-only',
       VITE_NOCODB_PRODUCTION_POOL_TABLE_ID: 'mtestworkbench',
       VITE_N8N_WEBHOOK_BASE_URL: '/webhook',
-      VITE_REMOTION_BASE_URL: 'https://render.example.invalid:3100/remotion/',
-      VITE_REMOTION_TOKEN: 'test token&value',
     }, fetcher)
     mount(3, api)
     await editor()
@@ -79,13 +80,20 @@ describe('改稿台', () => {
       })],
     ])
 
-    finishVideo(Response.json({ jobId: 'video room-17#v' }, { status: 202 }))
+    const signedUrl = 'https://Render.Example.invalid:443/video/17.mp4?sig=a%2fb+z%3d&part=1&part=2&empty=&ttl=86400'
+    finishVideo(Response.json({ jobId: 'video room-17#v', downloadUrl: signedUrl }, { status: 202 }))
     await screen.findByText('渲染任务已提交至渲染机，约需 40-60 秒完成')
     expect(screen.getByText('video room-17#v')).toBeTruthy()
     const link = screen.getByRole('link', { name: '下载成品 MP4' })
-    expect(link.getAttribute('href')).toBe('https://render.example.invalid:3100/remotion/download/video%20room-17%23v.mp4?token=test%20token%26value')
+    expect(link.getAttribute('href')).toBe(signedUrl)
     expect(link.getAttribute('target')).toBe('_blank')
     expect(link.getAttribute('rel')).toBe('noopener noreferrer')
+
+    press('生成视频')
+    expect(screen.queryByRole('link', { name: '下载成品 MP4' })).toBeNull()
+    await screen.findByText('video-next')
+    expect(screen.queryByText('video room-17#v')).toBeNull()
+    expect(screen.queryByRole('link', { name: '下载成品 MP4' })).toBeNull()
   })
 
   it.each([
@@ -113,10 +121,7 @@ describe('改稿台', () => {
 
   it('离线 Mock 提交默认横屏与云希音色，不产生网络请求或下载链接', async () => {
     const fetcher = vi.fn<typeof fetch>()
-    const api = createContentHubApi({
-      VITE_REMOTION_BASE_URL: 'https://render.example.invalid',
-      VITE_REMOTION_TOKEN: 'test-only',
-    }, fetcher)
+    const api = createContentHubApi({}, fetcher)
     const trigger = vi.spyOn(api, 'triggerWebhook')
     mount(3, api)
     await editor()
@@ -124,6 +129,7 @@ describe('改稿台', () => {
 
     await screen.findByText('mock-video-3-16x9-1')
     expect(trigger).toHaveBeenCalledExactlyOnceWith('generate-video', { production_id: 3, format: '16x9', voice: 'zh-CN-YunxiNeural' })
+    await expect(trigger.mock.results[0].value).resolves.toMatchObject({ jobId: 'mock-video-3-16x9-1', downloadUrl: null })
     expect(screen.queryByRole('link', { name: '下载成品 MP4' })).toBeNull()
     expect(fetcher).not.toHaveBeenCalled()
   })

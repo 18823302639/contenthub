@@ -1,5 +1,5 @@
 import type { ContentHubEnv } from './config'
-import { buildVideoDownloadUrl, readMode } from './config'
+import { readMode } from './config'
 import type { ContentHubApi, WebhookRequest } from './contracts'
 import { createMockBackend } from './mockApi'
 import { createNocodbClient } from './nocodbClient'
@@ -64,6 +64,5 @@ export function createContentHubApi(env: ContentHubEnv, fetcher: typeof fetch = 
       requireRecordId(payload.production_id)
       return triggerWebhook(...request)
     },
-    getVideoDownloadUrl: jobId => mode === 'mock' ? null : buildVideoDownloadUrl(env, jobId),
   }
 }

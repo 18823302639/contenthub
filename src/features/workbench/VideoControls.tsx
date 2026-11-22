@@ -11,7 +11,7 @@ const voiceOptions = [
 
 type Submission =
   | { phase: 'pending' }
-  | { phase: 'accepted'; jobId: string }
+  | { phase: 'accepted'; jobId: string; downloadUrl: string | null }
   | { phase: 'error'; message: string }
 
 export function VideoControls({ api, productionId }: { api: ContentHubApi; productionId: number }) {
@@ -22,15 +22,18 @@ export function VideoControls({ api, productionId }: { api: ContentHubApi; produ
   const [submission, setSubmission] = useState<Submission | null>(null)
   const pending = submission?.phase === 'pending'
   const jobId = submission?.phase === 'accepted' ? submission.jobId : null
-  const download = jobId ? api.getVideoDownloadUrl(jobId) : null
+  const downloadUrl = submission?.phase === 'accepted' ? submission.downloadUrl : null
 
   async function generate() {
     if (pending) return
     setSubmission({ phase: 'pending' })
     try {
       const receipt = await api.triggerWebhook('generate-video', { production_id: productionId, format, voice })
-      if (receipt.jobId) setSubmission({ phase: 'accepted', jobId: receipt.jobId })
-      else setSubmission({ phase: 'error', message: 'Webhook 已受理，但未返回有效任务 ID。请先核对 n8n 执行记录。' })
+      if (receipt.jobId) {
+        setSubmission({ phase: 'accepted', jobId: receipt.jobId, downloadUrl: receipt.downloadUrl ?? null })
+      } else {
+        setSubmission({ phase: 'error', message: 'Webhook 已受理，但未返回有效任务 ID。请先核对 n8n 执行记录。' })
+      }
     } catch (error) {
       const detail = error instanceof Error ? ` ${error.message}` : ''
       setSubmission({ phase: 'error', message: `视频任务提交未确认。${detail} 请先核对 n8n 执行记录。` })
@@ -78,8 +81,8 @@ export function VideoControls({ api, productionId }: { api: ContentHubApi; produ
             {api.mode === 'mock' ? <span>已生成模拟渲染任务。</span> : <span>渲染任务已提交至渲染机，约需 40-60 秒完成</span>}
             {' · 任务 ID '}<code>{jobId}</code>
           </div>
-          {download && (
-            <a className="button button--secondary" href={download} target="_blank" rel="noopener noreferrer">
+          {downloadUrl && (
+            <a className="button button--secondary" href={downloadUrl} target="_blank" rel="noopener noreferrer">
               <Download size={15} aria-hidden />下载成品 MP4
             </a>
           )}

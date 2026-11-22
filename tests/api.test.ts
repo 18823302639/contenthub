@@ -455,14 +455,28 @@ describe('n8n Webhook', () => {
     }
   })
 
-  it('下载链接需要两个配置值，支持 HTTPS 同源代理路径', () => {
-    const baseUrl = { VITE_REMOTION_BASE_URL: '/remotion/' }
-    const token = { VITE_REMOTION_TOKEN: 'test-only' }
-    for (const config of [baseUrl, token, { ...token, VITE_REMOTION_BASE_URL: '//other.example.invalid' }]) {
-      expect(createContentHubApi({ ...env, ...config }).getVideoDownloadUrl('job-1')).toBeNull()
-    }
-    expect(createContentHubApi({ ...env, ...baseUrl, ...token }).getVideoDownloadUrl('job-1'))
-      .toBe('/remotion/download/job-1.mp4?token=test-only')
+  const videoPayload = { production_id: 7, format: '16x9', voice: 'zh-CN-YunxiNeural' } as const
+
+  it('视频回执保留合法 HTTP 下载地址原文', async () => {
+    const downloadUrl = 'http://render.example.invalid:3100/file/7?sig=fake%2b%2F&ttl=86400'
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(Response.json({ jobId: 'job-1', downloadUrl }))
+    await expect(createContentHubApi(env, fetcher).triggerWebhook('generate-video', videoPayload))
+      .resolves.toEqual({ accepted: true, status: 200, jobId: 'job-1', downloadUrl })
+  })
+
+  it.each([
+    ['缺失地址', undefined],
+    ['非文本地址', 123],
+    ['畸形地址', 'https://[invalid'],
+    ['缺少主机名', 'https:///file.mp4'],
+    ['相对地址', '//render.example.invalid/file.mp4'],
+    ['JavaScript 地址', 'javascript:alert(1)'],
+    ['带空白字符的地址', 'https://render.example.invalid/file.mp4?sig=bad\tvalue'],
+  ])('视频回执中的%s不影响有效任务 ID', async (_label, downloadUrl) => {
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ jobId: 'job-1', downloadUrl }, { status: 202 }))
+    await expect(createContentHubApi(env, fetcher).triggerWebhook('generate-video', videoPayload))
+      .resolves.toEqual({ accepted: true, status: 202, jobId: 'job-1', downloadUrl: null })
   })
 
   it('Webhook HTTP 失败向调用方传播，缺配置显式失败', async () => {

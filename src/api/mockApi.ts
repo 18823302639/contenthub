@@ -69,7 +69,12 @@ export function createMockBackend() {
 
     const item = find('production_pool', payload.production_id)
     if (action === 'generate-video') {
-      return { accepted: true, status: 202, jobId: `mock-video-${item.id}-${payload.format}-${nextVideoJobId++}` }
+      return {
+        accepted: true,
+        status: 202,
+        jobId: `mock-video-${item.id}-${payload.format}-${nextVideoJobId++}`,
+        downloadUrl: null,
+      }
     }
     if (activeJobs.has(item.id)) throw new Error('这条选题已有模拟任务正在运行。')
 

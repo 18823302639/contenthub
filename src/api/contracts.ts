@@ -41,6 +41,7 @@ export interface WebhookReceipt {
   accepted: true
   status: number
   jobId?: string
+  downloadUrl?: string | null
 }
 
 export interface ContentHubApi {
@@ -57,7 +58,6 @@ export interface ContentHubApi {
   listPostMetrics(): Promise<PostMetric[]>
   createAccountMetric(metric: NewAccountMetric): Promise<AccountMetric>
   triggerWebhook(...request: WebhookRequest): Promise<WebhookReceipt>
-  getVideoDownloadUrl(jobId: string): string | null
 }
 
 export interface Tables {
