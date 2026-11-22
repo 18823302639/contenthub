@@ -65,6 +65,19 @@
 .wb-video-field select:disabled { cursor: not-allowed; opacity: .65; }
 .wb-video-label { color: var(--muted); font-size: 12px; font-weight: 650; }
 .wb-video-notice { margin-top: 8px; }
+.topic-feedback.wb-video-notice--ready {
+  border-color: #cde6d6;
+  background: #edf8f0;
+  color: #205a3b;
+}
+.wb-video-progress {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+}
+.wb-video-progress > svg { flex: none; }
+.wb-video-progress [role='timer'] { font-variant-numeric: tabular-nums; }
 .wb-video-notice code { overflow-wrap: anywhere; }
 .wb-video-notice .button { margin-inline-start: auto; }
 .wb-notice { margin-bottom: 10px; }

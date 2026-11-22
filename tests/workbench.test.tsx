@@ -13,6 +13,26 @@ function mount(id: number | string, api = createContentHubApi({})) {
   return api
 }
 
+async function mountVideoTasks(receipt: () => Promise<Response>, probe: typeof fetch) {
+  const record = await createContentHubApi({}).getProductionItem(3)
+  const fetcher = vi.fn<typeof fetch>().mockImplementation(async (url, options) => {
+    if (options?.method === 'POST') return receipt()
+    if (typeof url === 'string' && url.startsWith('https://')) return probe(url, options)
+    return Response.json(record)
+  })
+  const api = createContentHubApi({
+    VITE_USE_MOCK: 'false',
+    VITE_NOCODB_API_URL: '/nocodb',
+    VITE_NOCODB_TOKEN: 'test-only',
+    VITE_NOCODB_PRODUCTION_POOL_TABLE_ID: 'mtestworkbench',
+    VITE_N8N_WEBHOOK_BASE_URL: '/webhook',
+  }, fetcher)
+  mount(3, api)
+  await editor()
+  vi.useFakeTimers()
+  return fetcher
+}
+
 function editor() {
   return screen.findByRole<HTMLTextAreaElement>('textbox', { name: 'Markdown 编辑器' })
 }
@@ -35,24 +55,20 @@ afterEach(() => {
 })
 
 describe('改稿台', () => {
-  it('提交所选画幅和音色，原样显示当前任务的签名下载链接', async () => {
-    const record = await createContentHubApi({}).getProductionItem(3)
+  it.each([200, 206])('按 6 秒节奏重试 R2，HTTP %i 后解锁原样签名下载链接', async status => {
+    const signedUrl = 'https://Render.Example.invalid:443/video/17.mp4?sig=a%2fb+z%3d&part=1&part=2&empty=&ttl=86400'
+    const cancelBody = vi.fn()
+    const stream = new ReadableStream({ cancel: cancelBody })
+    const probe = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(null, { status: 404 }))
+      .mockRejectedValueOnce(new TypeError('network unavailable'))
+      .mockResolvedValueOnce(new Response(stream, { status }))
     let finishVideo!: (response: Response) => void
     const pending = new Promise<Response>(resolve => { finishVideo = resolve })
     const videoReceipt = vi.fn<() => Promise<Response>>()
       .mockReturnValueOnce(pending)
       .mockResolvedValueOnce(Response.json({ jobId: 'video-next' }, { status: 202 }))
-    const fetcher = vi.fn<typeof fetch>().mockImplementation(async (_url, options) =>
-      options?.method === 'POST' ? videoReceipt() : Response.json(record))
-    const api = createContentHubApi({
-      VITE_USE_MOCK: 'false',
-      VITE_NOCODB_API_URL: '/nocodb',
-      VITE_NOCODB_TOKEN: 'test-only',
-      VITE_NOCODB_PRODUCTION_POOL_TABLE_ID: 'mtestworkbench',
-      VITE_N8N_WEBHOOK_BASE_URL: '/webhook',
-    }, fetcher)
-    mount(3, api)
-    await editor()
+    const fetcher = await mountVideoTasks(videoReceipt, probe)
     const format = screen.getByRole<HTMLSelectElement>('combobox', { name: '视频画幅' })
     const voice = screen.getByRole<HTMLSelectElement>('combobox', { name: '配音音色' })
     expect(format.value).toBe('16x9')
@@ -80,20 +96,92 @@ describe('改稿台', () => {
       })],
     ])
 
-    const signedUrl = 'https://Render.Example.invalid:443/video/17.mp4?sig=a%2fb+z%3d&part=1&part=2&empty=&ttl=86400'
-    finishVideo(Response.json({ jobId: 'video room-17#v', downloadUrl: signedUrl }, { status: 202 }))
-    await screen.findByText('渲染任务已提交至渲染机，约需 40-60 秒完成')
+    await act(async () => finishVideo(Response.json({ jobId: 'video room-17#v', downloadUrl: signedUrl }, { status: 202 })))
     expect(screen.getByText('video room-17#v')).toBeTruthy()
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: '等待生成...' }).disabled).toBe(true)
+    expect(screen.queryByRole('link', { name: '下载成品 MP4' })).toBeNull()
+    await act(async () => vi.advanceTimersByTimeAsync(5_999))
+    expect(probe).not.toHaveBeenCalled()
+    expect(screen.getByRole('timer').textContent).toContain('5 秒')
+    await act(async () => vi.advanceTimersByTimeAsync(1))
+    expect(probe).toHaveBeenCalledExactlyOnceWith(signedUrl, expect.objectContaining({
+      method: 'GET', headers: { Range: 'bytes=0-0' }, cache: 'no-store',
+    }))
+    expect(screen.queryByRole('link', { name: '下载成品 MP4' })).toBeNull()
+    await act(async () => vi.advanceTimersByTimeAsync(6_000))
+    expect(probe).toHaveBeenCalledTimes(2)
+    expect(screen.getByRole('timer').textContent).toContain('12 秒')
+    expect(screen.queryByRole('link', { name: '下载成品 MP4' })).toBeNull()
+    await act(async () => vi.advanceTimersByTimeAsync(6_000))
+    expect(screen.getByText('视频已生成，可立即下载')).toBeTruthy()
+    expect(screen.queryByRole('timer')).toBeNull()
+    expect(cancelBody).toHaveBeenCalledOnce()
+    await act(async () => vi.advanceTimersByTimeAsync(180_000))
+    expect(probe).toHaveBeenCalledTimes(3)
     const link = screen.getByRole('link', { name: '下载成品 MP4' })
     expect(link.getAttribute('href')).toBe(signedUrl)
     expect(link.getAttribute('target')).toBe('_blank')
     expect(link.getAttribute('rel')).toBe('noopener noreferrer')
 
-    press('生成视频')
-    expect(screen.queryByRole('link', { name: '下载成品 MP4' })).toBeNull()
-    await screen.findByText('video-next')
+    await act(async () => press('生成视频'))
+    expect(screen.getByText('video-next')).toBeTruthy()
     expect(screen.queryByText('video room-17#v')).toBeNull()
     expect(screen.queryByRole('link', { name: '下载成品 MP4' })).toBeNull()
+    await act(async () => vi.advanceTimersByTimeAsync(6_000))
+    expect(probe).toHaveBeenCalledTimes(3)
+  })
+
+  it('探测持续无响应时在第 180 秒停止，解锁当前任务的手动下载', async () => {
+    const downloadUrl = 'https://render.example.invalid/timeout.mp4?sig=fake'
+    let finishLate!: (response: Response) => void
+    const probe = vi.fn<typeof fetch>().mockImplementation(() => new Promise(resolve => { finishLate = resolve }))
+    await mountVideoTasks(async () => Response.json({ jobId: 'slow-video', downloadUrl }), probe)
+    await act(async () => press('生成视频'))
+    await act(async () => vi.advanceTimersByTimeAsync(179_999))
+    expect(probe).toHaveBeenCalledTimes(29)
+    expect(screen.getByRole('timer').textContent).toContain('179 秒')
+    expect(screen.queryByRole('link', { name: '下载成品 MP4' })).toBeNull()
+    await act(async () => vi.advanceTimersByTimeAsync(1))
+    expect(screen.getByText('渲染耗时较长，请稍后手动尝试下载')).toBeTruthy()
+    expect(screen.getByText('slow-video')).toBeTruthy()
+    expect(screen.getByRole('link', { name: '下载成品 MP4' }).getAttribute('href')).toBe(downloadUrl)
+    expect(probe.mock.calls.every(([, init]) => init?.signal?.aborted)).toBe(true)
+    await act(async () => finishLate(new Response(null, { status: 206 })))
+    await act(async () => vi.advanceTimersByTimeAsync(6_000))
+    expect(probe).toHaveBeenCalledTimes(29)
+    expect(screen.queryByText('视频已生成，可立即下载')).toBeNull()
+  })
+
+  it('重新生成和卸载都会中止在途探测，旧响应无法更新新任务', async () => {
+    const firstUrl = 'https://render.example.invalid/first.mp4?sig=fake1'
+    const secondUrl = 'https://render.example.invalid/second.mp4?sig=fake2'
+    const receipt = vi.fn<() => Promise<Response>>()
+      .mockResolvedValueOnce(Response.json({ jobId: 'job-first', downloadUrl: firstUrl }))
+      .mockResolvedValueOnce(Response.json({ jobId: 'job-second', downloadUrl: secondUrl }))
+    let finishFirst!: (response: Response) => void
+    const probe = vi.fn<typeof fetch>()
+      .mockReturnValueOnce(new Promise(resolve => { finishFirst = resolve }))
+      .mockImplementation(() => new Promise(() => {}))
+    await mountVideoTasks(receipt, probe)
+    await act(async () => press('生成视频'))
+    await act(async () => vi.advanceTimersByTimeAsync(6_000))
+    expect(probe).toHaveBeenCalledOnce()
+    const oldSignal = probe.mock.calls[0][1]?.signal
+    expect(oldSignal?.aborted).toBe(false)
+
+    await act(async () => press('生成视频'))
+    expect(oldSignal?.aborted).toBe(true)
+    await act(async () => finishFirst(new Response(null, { status: 206 })))
+    expect(screen.getByText('job-second')).toBeTruthy()
+    expect(screen.queryByRole('link', { name: '下载成品 MP4' })).toBeNull()
+    await act(async () => vi.advanceTimersByTimeAsync(6_000))
+    expect(probe).toHaveBeenCalledTimes(2)
+    expect(probe.mock.calls[1][0]).toBe(secondUrl)
+    const currentSignal = probe.mock.calls[1][1]?.signal
+    cleanup()
+    expect(currentSignal?.aborted).toBe(true)
+    await act(async () => vi.advanceTimersByTimeAsync(180_000))
+    expect(probe).toHaveBeenCalledTimes(2)
   })
 
   it.each([

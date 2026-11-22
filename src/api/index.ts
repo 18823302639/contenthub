@@ -64,5 +64,24 @@ export function createContentHubApi(env: ContentHubEnv, fetcher: typeof fetch = 
       requireRecordId(payload.production_id)
       return triggerWebhook(...request)
     },
+    async probeVideoDownload(downloadUrl, signal) {
+      if (mode === 'mock') return false
+      try {
+        const response = await fetcher(downloadUrl, {
+          method: 'GET',
+          headers: { Range: 'bytes=0-0' },
+          cache: 'no-store',
+          credentials: 'omit',
+          referrerPolicy: 'no-referrer',
+          redirect: 'error',
+          signal,
+        })
+        // 服务若忽略 Range 并返回 200，只读取状态，同时取消下载响应体。
+        void response.body?.cancel().catch(() => {})
+        return response.status === 200 || response.status === 206
+      } catch {
+        return false
+      }
+    },
   }
 }

@@ -58,6 +58,7 @@ export interface ContentHubApi {
   listPostMetrics(): Promise<PostMetric[]>
   createAccountMetric(metric: NewAccountMetric): Promise<AccountMetric>
   triggerWebhook(...request: WebhookRequest): Promise<WebhookReceipt>
+  probeVideoDownload(downloadUrl: string, signal: AbortSignal): Promise<boolean>
 }
 
 export interface Tables {
