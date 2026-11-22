@@ -35,6 +35,87 @@ afterEach(() => {
 })
 
 describe('改稿台', () => {
+  it('提交所选画幅，等待任务 ID 后显示编码正确的新标签页下载链接', async () => {
+    const record = await createContentHubApi({}).getProductionItem(3)
+    let finishVideo!: (response: Response) => void
+    const pending = new Promise<Response>(resolve => { finishVideo = resolve })
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async (_url, options) =>
+      options?.method === 'POST' ? pending : Response.json(record))
+    const api = createContentHubApi({
+      VITE_USE_MOCK: 'false',
+      VITE_NOCODB_API_URL: '/nocodb',
+      VITE_NOCODB_TOKEN: 'test-only',
+      VITE_NOCODB_PRODUCTION_POOL_TABLE_ID: 'mtestworkbench',
+      VITE_N8N_WEBHOOK_BASE_URL: '/webhook',
+      VITE_REMOTION_BASE_URL: 'https://render.example.invalid:3100/remotion/',
+      VITE_REMOTION_TOKEN: 'test token&value',
+    }, fetcher)
+    mount(3, api)
+    await editor()
+    const format = screen.getByRole<HTMLSelectElement>('combobox', { name: '视频画幅' })
+    expect(format.value).toBe('16x9')
+    fireEvent.change(format, { target: { value: '9x16' } })
+    press('生成视频')
+
+    const waiting = screen.getByRole<HTMLButtonElement>('button', { name: '正在拆解分镜并推送渲染...' })
+    expect(waiting.disabled).toBe(true)
+    expect(waiting.getAttribute('aria-busy')).toBe('true')
+    expect(format.disabled).toBe(true)
+    fireEvent.click(waiting)
+    expect(fetcher.mock.calls.filter(([, init]) => init?.method === 'POST')).toEqual([
+      ['/webhook/generate-video', expect.objectContaining({
+        body: '{"production_id":3,"format":"9x16"}',
+        headers: { 'Content-Type': 'application/json' },
+      })],
+    ])
+
+    finishVideo(Response.json({ jobId: 'video room-17#v' }, { status: 202 }))
+    await screen.findByText('渲染任务已提交至渲染机，约需 40-60 秒完成')
+    expect(screen.getByText('video room-17#v')).toBeTruthy()
+    const link = screen.getByRole('link', { name: '下载成品 MP4' })
+    expect(link.getAttribute('href')).toBe('https://render.example.invalid:3100/remotion/download/video%20room-17%23v.mp4?token=test%20token%26value')
+    expect(link.getAttribute('target')).toBe('_blank')
+    expect(link.getAttribute('rel')).toBe('noopener noreferrer')
+  })
+
+  it.each([
+    [() => new Response(null, { status: 202 }), /未返回有效任务 ID/],
+    [() => new Response(null, { status: 502 }), /HTTP 502/],
+  ])('视频提交结果未确认时给出反馈并恢复按钮', async (response, message) => {
+    const record = await createContentHubApi({}).getProductionItem(3)
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async (_url, options) =>
+      options?.method === 'POST' ? response() : Response.json(record))
+    const api = createContentHubApi({
+      VITE_USE_MOCK: 'false',
+      VITE_NOCODB_API_URL: '/nocodb',
+      VITE_NOCODB_TOKEN: 'test-only',
+      VITE_NOCODB_PRODUCTION_POOL_TABLE_ID: 'mtestworkbench',
+      VITE_N8N_WEBHOOK_BASE_URL: '/webhook',
+    }, fetcher)
+    mount(3, api)
+    await editor()
+    press('生成视频')
+    expect((await screen.findByRole('alert')).textContent).toMatch(message)
+    expect(screen.queryByRole('link', { name: '下载成品 MP4' })).toBeNull()
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: '生成视频' }).disabled).toBe(false)
+    expect(fetcher.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1)
+  })
+
+  it('离线 Mock 给默认横屏任务返回模拟 ID，不产生网络请求或下载链接', async () => {
+    const fetcher = vi.fn<typeof fetch>()
+    const api = createContentHubApi({
+      VITE_REMOTION_BASE_URL: 'https://render.example.invalid',
+      VITE_REMOTION_TOKEN: 'test-only',
+    }, fetcher)
+    mount(3, api)
+    await editor()
+    press('生成视频')
+
+    await screen.findByText('mock-video-3-16x9-1')
+    expect(screen.queryByRole('link', { name: '下载成品 MP4' })).toBeNull()
+    expect(fetcher).not.toHaveBeenCalled()
+  })
+
   it('快捷模板填入可编辑的完整文字，清空后仍发送空的修改意见', async () => {
     const api = mount(3)
     const trigger = vi.spyOn(api, 'triggerWebhook')

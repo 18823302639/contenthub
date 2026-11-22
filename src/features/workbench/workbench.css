@@ -41,6 +41,22 @@
   font-size: 12px;
 }
 .wb-record-status time { font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.wb-video-controls {
+  grid-column: 1 / -1;
+  min-width: 0;
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+.wb-video-actions, .topic-feedback.wb-video-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+}
+.wb-video-label { color: var(--muted); font-size: 12px; font-weight: 650; }
+.wb-video-notice { margin-top: 8px; }
+.wb-video-notice code { overflow-wrap: anywhere; }
+.wb-video-notice .button { margin-inline-start: auto; }
 .wb-notice { margin-bottom: 10px; }
 .wb-loading { border-color: var(--line); background: var(--surface); color: var(--muted); }
 .wb-toolbar .wb-jump-to-draft { display: none; color: var(--accent); }

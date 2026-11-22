@@ -19,9 +19,12 @@ export type ProductionUpdate = Partial<Pick<ProductionItem,
   'raw_content' | 'fact_check' | 'draft_md' | 'final_md' | 'revision_note' | 'published_at' | 'is_benchmark'
 > & { workflow_status: WorkflowStatus }>
 
+export type VideoFormat = '16x9' | '9x16'
+
 export interface WebhookPayloads {
   'fetch-and-draft': { production_id: number }
   'rewrite-draft': { production_id: number; revision_note: string }
+  'generate-video': { production_id: number; format: VideoFormat }
 }
 
 export type WebhookAction = keyof WebhookPayloads
@@ -32,6 +35,7 @@ export type WebhookRequest = {
 export interface WebhookReceipt {
   accepted: true
   status: number
+  jobId?: string
 }
 
 export interface ContentHubApi {
@@ -48,6 +52,7 @@ export interface ContentHubApi {
   listPostMetrics(): Promise<PostMetric[]>
   createAccountMetric(metric: NewAccountMetric): Promise<AccountMetric>
   triggerWebhook(...request: WebhookRequest): Promise<WebhookReceipt>
+  getVideoDownloadUrl(jobId: string): string | null
 }
 
 export interface Tables {

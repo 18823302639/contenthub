@@ -13,6 +13,7 @@ function delay() {
 export function createMockBackend() {
   const data = makeMockData(Date.now())
   const activeJobs = new Set<number>()
+  let nextVideoJobId = 1
 
   function find<T extends TableName>(table: T, id: number): Tables[T] {
     const row = data[table].find(row => row.id === id)
@@ -67,6 +68,9 @@ export function createMockBackend() {
     await delay()
 
     const item = find('production_pool', payload.production_id)
+    if (action === 'generate-video') {
+      return { accepted: true, status: 202, jobId: `mock-video-${item.id}-${payload.format}-${nextVideoJobId++}` }
+    }
     if (activeJobs.has(item.id)) throw new Error('这条选题已有模拟任务正在运行。')
 
     if (action === 'fetch-and-draft' && item.workflow_status !== '已确认-待核对') {

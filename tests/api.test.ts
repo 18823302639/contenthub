@@ -455,6 +455,16 @@ describe('n8n Webhook', () => {
     }
   })
 
+  it('下载链接需要两个配置值，支持 HTTPS 同源代理路径', () => {
+    const baseUrl = { VITE_REMOTION_BASE_URL: '/remotion/' }
+    const token = { VITE_REMOTION_TOKEN: 'test-only' }
+    for (const config of [baseUrl, token, { ...token, VITE_REMOTION_BASE_URL: '//other.example.invalid' }]) {
+      expect(createContentHubApi({ ...env, ...config }).getVideoDownloadUrl('job-1')).toBeNull()
+    }
+    expect(createContentHubApi({ ...env, ...baseUrl, ...token }).getVideoDownloadUrl('job-1'))
+      .toBe('/remotion/download/job-1.mp4?token=test-only')
+  })
+
   it('Webhook HTTP 失败向调用方传播，缺配置显式失败', async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(new Response(null, { status: 500 }))
     const api = createContentHubApi(env, fetcher)

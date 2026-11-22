@@ -11,7 +11,12 @@ export function createWebhookClient(env: ContentHubEnv, fetcher: typeof fetch) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     })
-    // request 已校验 HTTP 2xx。n8n 可以返回任意响应体，也可以没有响应体。
-    return { accepted: true, status: response.status }
+    const receipt: WebhookReceipt = { accepted: true, status: response.status }
+    // 所有 HTTP 2xx 均表示受理，只有视频任务使用回执正文中的任务 ID。
+    if (action === 'generate-video') {
+      const body: { jobId?: unknown } | null = await response.json().catch(() => null)
+      if (typeof body?.jobId === 'string' && body.jobId.trim()) receipt.jobId = body.jobId.trim()
+    }
+    return receipt
   }
 }

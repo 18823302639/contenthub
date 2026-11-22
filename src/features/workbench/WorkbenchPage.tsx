@@ -10,6 +10,7 @@ import { isWorkflowStatus } from '../../types/schema'
 import type { ProductionItem } from '../../types/schema'
 import { externalUrl } from '../../utils/externalUrl'
 import { MarkdownPreview } from './MarkdownPreview'
+import { VideoControls } from './VideoControls'
 import { useWorkbench } from './useWorkbench'
 import type { WorkbenchSession } from './useWorkbench'
 import './workbench.css'
@@ -251,6 +252,7 @@ function Workbench({ api, id, writes, sessions, onWrite, refreshBoard, topicsPat
                 <ArrowDown size={15} aria-hidden />跳到稿件
               </button>
             </div>
+            <VideoControls api={api} productionId={id} />
           </div>
           <div className="wb-grid">
             <Sources record={record} />

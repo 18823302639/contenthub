@@ -82,6 +82,7 @@ npm run preview -- --host 127.0.0.1
 - 点击「AI 去味改稿」前，可留空、手填或选择快捷模板后编辑。留空会发送 `revision_note: ''`。界面先保存修改意见和「需AI润色」，确认回读后发出一次 `rewrite-draft`。真实模式受理后每 4 秒查询，最多等待 90 秒。手动刷新只读查询，同一任务沿用原轮询期限。
 - 读到新增或变化的非空 `draft_md` 时，编辑区立即显示它。若流程状态先更新，则继续等待正文回写。等待期间的人工稿件可在「本地备份」恢复，离开再返回改稿台时，本次应用会话会保留新初稿和备份。需要长期保留时，请保存定稿。仅更新定稿字段的工作流仍提供「回写稿」对照。
 - 读写失败或 Webhook 受理结果不明时，可刷新记录核对。刷新只读取记录。若记录仍显示「需AI润色」且没有可见结果，核对对应 n8n 执行记录。离开该选题或重载页面前，请保存需要保留的本地编辑。
+- 「生成视频」默认选 16x9，也可切换为 9x16。工作流按选题 ID 读取已存内容，需要带上刚编辑的正文时请先保存定稿。回执中的任务 ID 表示渲染任务已提交，约 40–60 秒后可尝试下载。Mock 仅演示提交回执。
 
 ## RSS 信源管理
 
@@ -213,9 +214,9 @@ ContentHub/
 - 单条读取使用 `GET /tables/{tableId}/records/{id}`。`POST` 新增和 `PATCH` 更新都发送一项记录数组到记录集合。PATCH 包含主键，写入成功后按回执主键回读。NocoDB 主键显示名默认 `id`，可将 `VITE_NOCODB_ID_FIELD` 设为实际显示名，例如 `Id`。前端模型统一使用数值型 `id`。 [NocoDB v2 数据 API](https://nocodb.com/apis/v2/data)
 - 读取时，未知选项保留原文本并在控制台提示。标题接受数组、JSON 数组或单条文本。缺失文本和日期为空字符串，`ai_outline` 缺失时为 `null`，无效数值按缺失处理。布尔值兼容 `true`、`false`、`1`、`0` 及其字符串。列表内无有效主键的记录会跳过，分页仍按原始条数前进。
 - `post_metrics` 只读接口按同名字段兼容 `production_id`、`platform`、展现、阅读、CTR、完读率、收益和记录日期。项目没有这张表的专属列定义，同名字段以外的列需要确认实际映射后才可使用。运营页继续查询 `account_metrics`。
-- n8n 以 `VITE_N8N_WEBHOOK_BASE_URL` 为基础地址，JSON body 通过 POST 发往 `${VITE_N8N_WEBHOOK_BASE_URL}/${action}`。此接口的回执只表示收到 HTTP 2xx，业务步骤的实际完成需要查看 NocoDB 记录。 [n8n Webhook](https://docs.n8n.io/integrations/builtin/core-nodes/n8n-nodes-base.webhook/)
+- n8n 以 `VITE_N8N_WEBHOOK_BASE_URL` 为基础地址，JSON body 通过 POST 发往 `${VITE_N8N_WEBHOOK_BASE_URL}/${action}`。初稿和改稿的 2xx 回执表示请求受理，完成结果通过 NocoDB 回读。视频工作流还需在 2xx JSON 回执中返回非空字符串 `jobId`。 [n8n Webhook](https://docs.n8n.io/integrations/builtin/core-nodes/n8n-nodes-base.webhook/)
 
-真实部署待实测项目包括 PostgreSQL 外部表在 NocoDB 中暴露的字段名和类型、主键和创建时间默认值、标题 JSON 与日期的实际序列化、单条写入回执及分页上限，以及已激活的 n8n 工作流对两个 payload 的解析、鉴权和写回状态。接口测试使用合成响应，未连接真实 NocoDB 和 n8n。
+真实部署待实测项目包括 PostgreSQL 外部表在 NocoDB 中暴露的字段名和类型、主键和创建时间默认值、标题 JSON 与日期的实际序列化、单条写入回执及分页上限，以及已激活的 n8n 工作流对 payload 的解析、鉴权和写回状态。接口测试使用合成响应，未连接真实 NocoDB、n8n 和渲染机。
 
 ### 受理、完成与重试
 
@@ -225,6 +226,7 @@ ContentHub/
 | --- | --- | --- | --- |
 | `fetch-and-draft` | `workflow_status: '已确认-待核对'` | `{ production_id }` | 写入原文、事实核查与初稿，状态改为「AI初稿完成」 |
 | `rewrite-draft` | 本次 `revision_note` 与 `workflow_status: '需AI润色'` | `{ production_id, revision_note }`，修改意见可为空字符串 | 优先展示回写的 `draft_md`，流程就绪后状态为「待人工终审」 |
+| `generate-video` | 按需保存最新定稿 | `{ production_id, format }`，`format` 为 `16x9` 或 `9x16` | 返回模拟 `jobId` |
 
 状态写入和 Webhook 受理是两次独立请求。先确认写入结果，再触发对应 Webhook。写入已返回成功但回执或回读异常时，API 抛出 `WriteReadbackError`，优先按可用主键查询记录。Webhook 超时、断网或响应有歧义时，先查记录和 n8n 执行历史，确认未启动后再触发。真实工作流若需要允许安全重试，应先约定执行标识与去重规则。 [n8n Webhook 响应模式](https://docs.n8n.io/integrations/builtin/core-nodes/n8n-nodes-base.webhook/#respond)
 
@@ -232,6 +234,8 @@ ContentHub/
 
 `VITE_*` 会进入浏览器产物。`VITE_NOCODB_TOKEN` 在直连时也会出现在浏览器请求中。禁止将真实长期 `xc-token` 写入任何公开或共享构建。只在隔离、受控的临时联调中使用短期、最小权限凭证。
 
-部署环境可使用现有同源反向代理，例如将基础地址设为 `/internal/nocodb/api/v2` 和 `/internal/n8n/webhook`。若代理负责注入凭证，可让浏览器的 `VITE_NOCODB_TOKEN` 使用公开标记 `proxy-managed`。代理应在完成用户鉴权和授权后覆盖客户端发送的 `xc-token`，仅放行所需表、方法及两个 Webhook 路径。可按现有设施选用身份网关、VPN 或内网访问控制。跨源 CORS 用于控制浏览器可读取响应的来源。身份校验、表和工作流的访问授权仍需独立配置。此方案由部署环境提供，本阶段只交付前端适配。
+部署环境可使用现有同源反向代理，例如将基础地址设为 `/internal/nocodb/api/v2` 和 `/internal/n8n/webhook`。若代理负责注入凭证，可让浏览器的 `VITE_NOCODB_TOKEN` 使用公开标记 `proxy-managed`。代理应在完成用户鉴权和授权后覆盖客户端发送的 `xc-token`，仅放行所需表、方法及指定的 Webhook 路径。可按现有设施选用身份网关、VPN 或内网访问控制。跨源 CORS 用于控制浏览器可读取响应的来源。身份校验、表和工作流的访问授权仍需独立配置。此方案由部署环境提供，本阶段只交付前端适配。
+
+视频下载入口需要同时配置 `VITE_REMOTION_BASE_URL` 和 `VITE_REMOTION_TOKEN`，例如 `https://render.example.invalid` 或 HTTPS 站点下的同源 `/remotion` 路径。前端会在新标签页打开 `/download/{jobId}.mp4?token=…`，由渲染服务提供文件。HTTPS 页面应使用 HTTPS 下载地址，浏览器可能拦截 HTTP 下载。下载令牌也会出现在浏览器产物和 URL 中，仅使用受控的短期、限权下载令牌。 [W3C 混合内容规范](https://www.w3.org/TR/mixed-content/#modifications-to-html)
 
 阶段 6 完成 ContentHub 的离线 Mock 源码交付。
