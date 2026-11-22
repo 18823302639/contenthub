@@ -60,11 +60,8 @@ export function createContentHubApi(env: ContentHubEnv, fetcher: typeof fetch = 
     listPostMetrics: () => store.list('post_metrics'),
     createAccountMetric: metric => store.create('account_metrics', metric),
     async triggerWebhook(...request: WebhookRequest) {
-      const [action, payload] = request
+      const [, payload] = request
       requireRecordId(payload.production_id)
-      if (action === 'rewrite-draft' && !payload.revision_note.trim()) {
-        throw new Error('提交润色时请填写修改意见。')
-      }
       return triggerWebhook(...request)
     },
   }

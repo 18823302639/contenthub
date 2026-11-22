@@ -3,12 +3,16 @@ import type { RecordWrites } from '../../app/useRecordWrites'
 import { isWorkflowStatus } from '../../types/schema'
 import { WriteReadbackError } from '../../api'
 import type { ContentHubApi } from '../../api'
+import { pollWorkflow } from '../../api/workflowPolling'
 import type { ProductionItem } from '../../types/schema'
+import { renderMarkdownHtml } from './MarkdownPreview'
 
 interface WorkingDocument {
   record: ProductionItem
   markdown: string
   incoming: string | null
+  preferredDraft: string | null
+  backups: string[]
 }
 
 interface Notice {
@@ -20,7 +24,17 @@ interface Notice {
 interface PendingJob {
   status: '已确认-待核对' | '需AI润色'
   note?: string
+  draftBefore?: string
+  finalBefore?: string
+  loadedDraft?: boolean
+  startedAt?: number
   receipt: 'existing' | 'notSent' | 'unconfirmed' | 'accepted'
+}
+
+export interface WorkbenchSession {
+  document: WorkingDocument | null
+  job: PendingJob | null
+  generation: number
 }
 
 type Operation = 'reading' | 'saving' | 'publishing' | 'rewriting' | 'benchmarking'
@@ -36,28 +50,74 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : '请求失败。'
 }
 
+function displayedMarkdown(doc: WorkingDocument) {
+  return doc.preferredDraft ?? savedMarkdown(doc.record)
+}
+
 function mergeRecord(current: WorkingDocument | null, record: ProductionItem, submitted?: string): WorkingDocument {
-  const latest = savedMarkdown(record)
-  if (!current || (submitted === undefined && current.markdown === savedMarkdown(current.record))) {
-    return { record, markdown: latest, incoming: null }
+  const preferredDraft = current?.preferredDraft != null && record.final_md === current.record.final_md &&
+    (submitted === undefined || record.final_md !== submitted)
+    ? (record.draft_md?.trim() ? record.draft_md : current.preferredDraft)
+    : null
+  const latest = preferredDraft ?? savedMarkdown(record)
+  const backups = current?.backups ?? []
+  if (!current || (submitted === undefined && current.markdown === displayedMarkdown(current))) {
+    return { record, markdown: latest, incoming: null, preferredDraft, backups }
   }
 
   const hasIncoming = current.markdown !== latest && latest !== submitted &&
-    (current.incoming !== null || latest !== savedMarkdown(current.record))
-  return { record, markdown: current.markdown, incoming: hasIncoming ? latest : null }
+    (current.incoming !== null || latest !== displayedMarkdown(current))
+  return { record, markdown: current.markdown, incoming: hasIncoming ? latest : null, preferredDraft, backups }
+}
+
+function withDraft(current: WorkingDocument | null, record: ProductionItem, draft: string): WorkingDocument {
+  const backups = current?.backups ?? []
+  const shouldBackUp = current && current.markdown !== displayedMarkdown(current) &&
+    current.markdown !== draft && !backups.includes(current.markdown)
+  return {
+    record, markdown: draft, preferredDraft: draft, incoming: null,
+    backups: shouldBackUp ? [...backups, current.markdown] : backups,
+  }
 }
 
 function pendingJob(record: ProductionItem): PendingJob | null {
   if (record.workflow_status === '已确认-待核对') return { status: '已确认-待核对', receipt: 'existing' }
   if (record.workflow_status === rewriteStatus) {
-    return { status: rewriteStatus, note: record.revision_note, receipt: 'existing' }
+    return {
+      status: rewriteStatus, note: record.revision_note ?? '', draftBefore: record.draft_md ?? '',
+      finalBefore: record.final_md ?? '', receipt: 'existing',
+    }
   }
   return null
 }
 
 function matchesPending(record: ProductionItem, expected: PendingJob) {
   return record.workflow_status === expected.status &&
-    (expected.status === '已确认-待核对' || record.revision_note === expected.note)
+    (expected.status === '已确认-待核对' || (record.revision_note ?? '') === expected.note)
+}
+
+function isRewriteReview(record: ProductionItem, expected: PendingJob) {
+  return expected.status === rewriteStatus && record.workflow_status === '待人工终审' &&
+    (record.revision_note ?? '') === expected.note
+}
+
+function awaitingResult(record: ProductionItem, expected: PendingJob) {
+  const changedFinal = Boolean(record.final_md?.trim()) && record.final_md !== expected.finalBefore
+  return matchesPending(record, expected) || (
+    expected.receipt !== 'notSent' && isRewriteReview(record, expected) &&
+    !expected.loadedDraft && !changedFinal
+  )
+}
+
+function changedDraft(record: ProductionItem, expected: PendingJob | null) {
+  if (expected?.status !== rewriteStatus || expected.receipt === 'notSent' ||
+    (record.revision_note ?? '') !== expected.note ||
+    (record.workflow_status !== rewriteStatus && record.workflow_status !== '待人工终审') ||
+    !record.draft_md?.trim() || record.draft_md === expected.draftBefore) return null
+
+  expected.draftBefore = record.draft_md
+  expected.loadedDraft = true
+  return record.draft_md
 }
 
 export function useWorkbench(
@@ -66,17 +126,18 @@ export function useWorkbench(
   writes: RecordWrites,
   onWrite: (record: ProductionItem) => void,
   refreshBoard: () => void,
+  sessions: Map<number, WorkbenchSession>,
 ) {
-  const [doc, setDoc] = useState<WorkingDocument | null>(null)
+  const [session] = useState<WorkbenchSession>(() => sessions.get(id) ?? { document: null, job: null, generation: 0 })
+  const [doc, setDoc] = useState(session.document)
   const [note, setNote] = useState('')
   const [operation, setOperation] = useState<Operation | null>('reading')
   const [notice, setNotice] = useState<Notice | null>(null)
   const [copyNotice, setCopyNotice] = useState<Notice | null>(null)
   const [needsRead, setNeedsRead] = useState(false)
+  const [watching, setWatching] = useState(false)
   const lock = useRef(false)
   const live = useRef(true)
-  const generation = useRef(0)
-  const job = useRef<PendingJob | null>(null)
 
   const read = useCallback(async () => {
     const record = await api.getProductionItem(id)
@@ -87,13 +148,16 @@ export function useWorkbench(
   useEffect(() => {
     let stale = false
     live.current = true
+    sessions.set(id, session)
+    session.generation++
     void read().then(record => {
       if (stale) return
-      setDoc(mergeRecord(null, record))
+      const existing = session.job ?? pendingJob(record)
+      session.job = existing
+      const draft = changedDraft(record, existing)
+      updateDocument(current => draft === null ? mergeRecord(current, record) : withDraft(current, record, draft))
       setNote(record.revision_note ?? '')
-      const existing = pendingJob(record)
-      if (existing) {
-        job.current = existing
+      if (existing && !inspectJob(record, existing) && existing.receipt !== 'notSent') {
         void watch(existing)
       }
     }).catch(error => {
@@ -105,43 +169,49 @@ export function useWorkbench(
       stale = true
       live.current = false
     }
-  }, [read])
+  }, [id, read, session, sessions])
 
   const record = doc?.record
   const dirty = Boolean(doc && doc.markdown !== savedMarkdown(doc.record))
   const pending = record?.workflow_status === rewriteStatus || record?.workflow_status === '已确认-待核对'
   const terminal = record?.workflow_status === '已发布' || record?.workflow_status === '已放弃'
   const canChangeStatus = record !== undefined && isWorkflowStatus(record.workflow_status) && !terminal
-  const blocked = operation !== null || needsRead || pending || writes.lockedIds.has(id)
+  const blocked = operation !== null || needsRead || pending || watching || writes.lockedIds.has(id)
   const canSave = Boolean(doc?.markdown.trim()) && !blocked && (dirty || !record?.final_md?.trim())
   const canPublish = Boolean(record?.final_md?.trim()) && !dirty && !blocked && canChangeStatus
-  const canRewrite = Boolean(record && savedMarkdown(record).trim() && note.trim()) && !dirty && !blocked && canChangeStatus
+  const canRewrite = Boolean(doc?.markdown.trim()) && !dirty && !blocked && canChangeStatus
   const canToggleBenchmark = Boolean(record) && !blocked
 
   function display(text: string, error = false) {
     if (live.current) setNotice({ text, error })
   }
 
+  function updateDocument(update: (current: WorkingDocument | null) => WorkingDocument | null) {
+    session.document = update(session.document)
+    if (live.current) setDoc(session.document)
+  }
+
   function acceptWrite(record: ProductionItem, submitted?: string) {
     if (record.id !== id) throw new Error('写入回读与请求的选题 ID 不一致。')
     onWrite(record)
-    if (live.current) setDoc(current => mergeRecord(current, record, submitted))
+    updateDocument(current => mergeRecord(current, record, submitted))
   }
 
-  function observeRead(record: ProductionItem) {
+  function observeRead(record: ProductionItem, draft: string | null = null) {
     refreshBoard()
-    if (live.current) setDoc(current => mergeRecord(current, record))
+    updateDocument(current => draft === null ? mergeRecord(current, record) : withDraft(current, record, draft))
   }
 
   function inspectJob(record: ProductionItem, expected: PendingJob) {
-    if (matchesPending(record, expected)) return false
-    job.current = null
+    if (awaitingResult(record, expected)) return false
+    session.job = null
     if (expected.receipt === 'notSent') {
       display('已读取最新记录。本次未发送 Webhook。')
     } else if (expected.status === '已确认-待核对' && record.workflow_status === 'AI初稿完成') {
       display('初稿已回写。')
-    } else if (expected.status === rewriteStatus && record.revision_note === expected.note && record.workflow_status === '待人工终审') {
-      if (live.current) setNotice({ text: '改稿结果已回写。', rewriteComplete: true })
+    } else if (isRewriteReview(record, expected)) {
+      const text = expected.loadedDraft ? '改稿结果已回写，已加载最新初稿。' : '改稿结果已回写。'
+      if (live.current) setNotice({ text, rewriteComplete: true })
     } else {
       display('记录已进入其他流程状态。请核对稿件与修改意见。', true)
     }
@@ -149,28 +219,32 @@ export function useWorkbench(
   }
 
   async function watch(expected: PendingJob) {
-    const version = ++generation.current
+    const version = ++session.generation
+    expected.startedAt ??= Date.now()
     const active = () => (live.current || expected.receipt === 'accepted') &&
-      version === generation.current && job.current === expected
-    const interval = api.mode === 'mock' ? 420 : 3_000
-    const limit = api.mode === 'mock' ? 10 : 20
+      version === session.generation && session.job === expected
     const acknowledged = expected.receipt === 'accepted'
+    if (live.current) setWatching(true)
     try {
-      for (let attempt = 0; attempt < limit; attempt++) {
-        await new Promise(resolve => setTimeout(resolve, interval))
-        if (!active()) return
-        const latest = await read()
-        if (!active()) return
-        if (matchesPending(latest, expected)) continue
-        observeRead(latest)
-        inspectJob(latest, expected)
-        return
-      }
-      if (active()) {
+      const finished = await pollWorkflow(api.mode, active, read, latest => {
+        const draft = changedDraft(latest, expected)
+        if (awaitingResult(latest, expected)) {
+          if (draft !== null) {
+            observeRead(latest, draft)
+            display('已加载最新初稿，等待流程状态回写。')
+          }
+          return false
+        }
+        observeRead(latest, draft)
+        return inspectJob(latest, expected)
+      }, expected.startedAt)
+      if (!finished && active()) {
         display((acknowledged ? 'Webhook 已受理，' : '') + '暂未读到回写结果。可刷新记录继续核对。', true)
       }
     } catch (error) {
       if (active()) display((acknowledged ? 'Webhook 已受理，' : '') + '读取回写失败。' + errorMessage(error), true)
+    } finally {
+      if (live.current && version === session.generation) setWatching(false)
     }
   }
 
@@ -199,16 +273,17 @@ export function useWorkbench(
 
   async function refresh() {
     await run('reading', async () => {
-      generation.current++
+      session.generation++
+      setWatching(false)
       display('正在读取最新记录…')
       try {
         const latest = await read()
         if (!live.current) return
-        observeRead(latest)
+        const expected = session.job ?? pendingJob(latest)
+        observeRead(latest, changedDraft(latest, expected))
         setNeedsRead(false)
         if (!doc) setNote(latest.revision_note ?? '')
-        const expected = job.current ?? pendingJob(latest)
-        job.current = expected
+        session.job = expected
         if (!expected) {
           display('已读取最新记录。')
         } else if (!inspectJob(latest, expected)) {
@@ -290,23 +365,27 @@ export function useWorkbench(
     if (!canRewrite) return
     const revision = note.trim()
     await run('rewriting', async () => {
+      let draftBefore: string
+      let finalBefore: string
       display('正在保存修改意见…')
       try {
         const saved = await api.updateProductionItem(id, { workflow_status: rewriteStatus, revision_note: revision })
         acceptWrite(saved)
-        if (saved.workflow_status !== rewriteStatus || saved.revision_note !== revision) {
+        if (saved.workflow_status !== rewriteStatus || (saved.revision_note ?? '') !== revision) {
           display('回读未确认本次修改意见和流程状态。本次未发送 Webhook。', true)
           return
         }
+        draftBefore = saved.draft_md ?? ''
+        finalBefore = saved.final_md ?? ''
       } catch (error) {
-        job.current = { status: rewriteStatus, note: revision, receipt: 'notSent' }
+        session.job = { status: rewriteStatus, note: revision, receipt: 'notSent' }
         writeUnverified(error, true)
         return
       }
 
       display('修改意见已保存，正在请求 Webhook…')
-      const expected: PendingJob = { status: rewriteStatus, note: revision, receipt: 'unconfirmed' }
-      job.current = expected
+      const expected: PendingJob = { status: rewriteStatus, note: revision, draftBefore, finalBefore, receipt: 'unconfirmed' }
+      session.job = expected
       try {
         await api.triggerWebhook('rewrite-draft', { production_id: id, revision_note: revision })
         expected.receipt = 'accepted'
@@ -319,29 +398,58 @@ export function useWorkbench(
   }
 
   function edit(markdown: string) {
-    setDoc(current => current && {
-      ...current, markdown, incoming: markdown === savedMarkdown(current.record) ? null : current.incoming,
+    updateDocument(current => current && {
+      ...current, markdown, incoming: markdown === displayedMarkdown(current) ? null : current.incoming,
     })
   }
 
-  async function copy() {
-    if (!doc?.markdown.trim()) return
+  async function copy(format: 'rich' | 'markdown') {
+    const markdown = doc?.markdown
+    if (!markdown?.trim()) return
     try {
-      await navigator.clipboard.writeText(doc.markdown)
-      if (live.current) setCopyNotice({ text: '已复制全文。' })
+      if (format === 'rich' && navigator.clipboard?.write && typeof ClipboardItem === 'function') {
+        try {
+          const html = renderMarkdownHtml(markdown).then(markup => new Blob([markup], { type: 'text/html' }))
+          // 直接响应点击发起写入。即使浏览器拒绝构造 ClipboardItem，也接住延迟加载失败。
+          void html.catch(() => {})
+          const write = navigator.clipboard.write([new ClipboardItem({
+            'text/html': html,
+            'text/plain': new Blob([markdown], { type: 'text/plain' }),
+          })])
+          await Promise.all([write, html])
+          if (live.current) setCopyNotice({ text: '已复制全文（富文本）。' })
+          return
+        } catch {
+          // 浏览器或权限不支持富文本时，继续尝试写入原始 Markdown。
+        }
+      }
+      await navigator.clipboard.writeText(markdown)
+      if (live.current) setCopyNotice({ text: format === 'markdown' ? '已复制 Markdown。' : '已复制全文。' })
     } catch {
       if (live.current) setCopyNotice({ text: '无法访问剪贴板，请在编辑区手动复制。', error: true })
     }
   }
 
   function adoptIncoming() {
-    setDoc(current => current?.incoming != null
+    updateDocument(current => current?.incoming != null
       ? { ...current, markdown: current.incoming, incoming: null }
       : current)
   }
 
+  function restoreBackup(index: number) {
+    updateDocument(current => {
+      const backup = current?.backups[index]
+      if (!current || backup === undefined) return current
+      const backups = current.backups.filter((_, i) => i !== index)
+      if (current.markdown !== displayedMarkdown(current) && current.markdown !== backup && !backups.includes(current.markdown)) {
+        backups.push(current.markdown)
+      }
+      return { ...current, markdown: backup, incoming: null, backups }
+    })
+  }
+
   return {
-    doc, note, setNote, dirty, pending, operation, notice, copyNotice, canSave, canPublish, canRewrite, canToggleBenchmark,
-    refresh, edit, save, publish, rewrite, toggleBenchmark, copy, adoptIncoming,
+    doc, note, setNote, dirty, pending, watching, operation, notice, copyNotice, canSave, canPublish, canRewrite, canToggleBenchmark,
+    refresh, edit, save, publish, rewrite, toggleBenchmark, copy, adoptIncoming, restoreBackup,
   }
 }

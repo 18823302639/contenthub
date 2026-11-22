@@ -26,3 +26,8 @@ export function MarkdownPreview({ text }: { text: string }) {
     </div>
   )
 }
+
+export async function renderMarkdownHtml(markdown: string) {
+  const { renderToStaticMarkup } = await import('react-dom/server')
+  return renderToStaticMarkup(<MarkdownPreview text={markdown} />)
+}

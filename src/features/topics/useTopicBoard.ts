@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { WriteReadbackError } from '../../api'
 import type { ContentHubApi } from '../../api'
+import { pollWorkflow } from '../../api/workflowPolling'
 import type { RecordWrites } from '../../app/useRecordWrites'
 import { isWorkflowStatus } from '../../types/schema'
 import type { ProductionItem } from '../../types/schema'
@@ -14,6 +15,8 @@ const messages = {
   ready: '初稿已回写。',
   webhookUnverified: '状态已保存，但 Webhook 受理未确认。请核对执行记录，或刷新查看选题状态。',
   watchPaused: 'Webhook 已受理，暂未读到初稿。可刷新列表查看最新状态。',
+  watchFailed: '读取初稿回写失败。可刷新列表查看最新状态。',
+  watchChanged: '回读显示其他流程状态。请核对选题。',
   saveUnverified: '未能确认状态已保存。请刷新列表核对，本次未触发 Webhook。',
   readbackFailed: '保存请求成功，但回读失败。请刷新列表核对，本次未触发 Webhook。',
   checked: '已读取最新状态。',
@@ -45,6 +48,7 @@ export function describeActivity(activity: TopicActivity) {
 
 export function isActivityError(activity: TopicActivity) {
   return activity.kind === 'webhookUnverified' || activity.kind === 'watchPaused' ||
+    activity.kind === 'watchFailed' || activity.kind === 'watchChanged' ||
     activity.kind === 'saveUnverified' || activity.kind === 'readbackFailed' ||
     activity.kind === 'abandonUnverified' || activity.kind === 'stateChanged'
 }
@@ -55,7 +59,8 @@ export function isMutationBlocked(activity?: TopicActivity) {
 }
 
 function isWatching(activity?: TopicActivity) {
-  return activity?.kind === 'waiting' || activity?.kind === 'webhookUnverified' || activity?.kind === 'watchPaused'
+  return activity?.kind === 'waiting' || activity?.kind === 'webhookUnverified' || activity?.kind === 'watchPaused' ||
+    activity?.kind === 'watchFailed' || activity?.kind === 'watchChanged'
 }
 
 export function canConfirm(item: ProductionItem, activity?: TopicActivity) {
@@ -79,7 +84,7 @@ function observeActivity(item: ProductionItem, activity?: TopicActivity): TopicA
   if (isWatching(activity) && item.workflow_status === 'AI初稿完成') return activityFor(item, 'ready')
   if (isWatching(activity) && item.workflow_status === '已放弃') return activityFor(item, 'abandoned')
   if (activity.kind === 'waiting' && item.workflow_status !== confirmedStatus) {
-    return activityFor(item, 'watchPaused', `当前记录为「${item.workflow_status}」。`)
+    return activityFor(item, 'watchChanged', `当前记录为「${item.workflow_status}」。`)
   }
   if (activity.kind === 'saveUnverified' || activity.kind === 'readbackFailed' || activity.kind === 'abandonUnverified') {
     return activityFor(item, 'checked', `当前记录为「${item.workflow_status}」。`)
@@ -172,35 +177,31 @@ export function useTopicBoard(api: ContentHubApi, writes: RecordWrites) {
     const id = item.id
     const token = Symbol()
     watchers.current.set(id, token)
-    const interval = api.mode === 'mock' ? 420 : 3_000
-    const maxReads = api.mode === 'mock' ? 10 : 20
     const active = () => mounted.current && watchers.current.get(id) === token
 
     try {
-      for (let attempt = 0; attempt < maxReads; attempt++) {
-        await new Promise<void>(resolve => setTimeout(resolve, interval))
-        if (!active()) return
-
+      const finished = await pollWorkflow(api.mode, active, async () => {
         const ticket = ++sequence.current
-        let latest: ProductionItem
         try {
-          latest = await api.getProductionItem(id)
+          return { ticket, latest: await api.getProductionItem(id) }
         } catch (error) {
-          if (!active()) return
-          if ((observedAt.current.get(id) ?? 0) > ticket) continue
-          publish(item, 'watchPaused', { detail: message(error), ticket })
-          return
+          return { ticket, error: message(error) }
         }
-        if (!active()) return
-        if ((observedAt.current.get(id) ?? 0) > ticket || latest.workflow_status === confirmedStatus) continue
+      }, ({ ticket, latest, error }) => {
+        if ((observedAt.current.get(id) ?? 0) > ticket) return false
+        if (!latest) {
+          publish(item, 'watchFailed', { detail: error, ticket })
+          return true
+        }
+        if (latest.workflow_status === confirmedStatus) return false
 
         const observed = { replaceItem: true, ticket }
         if (latest.workflow_status === 'AI初稿完成') publish(latest, 'ready', observed)
         else if (latest.workflow_status === '已放弃') publish(latest, 'abandoned', observed)
-        else publish(latest, 'watchPaused', { ...observed, detail: `当前记录为「${latest.workflow_status}」。` })
-        return
-      }
-      if (active()) publish(item, 'watchPaused')
+        else publish(latest, 'watchChanged', { ...observed, detail: `当前记录为「${latest.workflow_status}」。` })
+        return true
+      })
+      if (!finished && active()) publish(item, 'watchPaused')
     } finally {
       if (active()) watchers.current.delete(id)
     }

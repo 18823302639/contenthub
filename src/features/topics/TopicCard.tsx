@@ -1,6 +1,7 @@
-import { ArrowUpRight, Star } from 'lucide-react'
+import { ArrowUpRight, LoaderCircle, Star } from 'lucide-react'
 import { useId } from 'react'
 import { Link, useLocation } from 'react-router-dom'
+import { aiProcessingLabel } from '../../api/workflowPolling'
 import { complianceRisks, isWorkflowStatus, productionTracks } from '../../types/schema'
 import type { ProductionItem, WorkflowStatus } from '../../types/schema'
 import { externalUrl } from '../../utils/externalUrl'
@@ -69,7 +70,11 @@ export function TopicCard({ item, activity, writeBusy, onConfirm, onAbandon }: {
       </div>
       {activity && <TopicFeedback activity={activity} />}
       <div className="topic-actions">
-        {item.workflow_status === '待筛选' && (
+        {activity?.kind === 'waiting' ? (
+          <button type="button" className="button button--primary" disabled aria-busy="true">
+            <LoaderCircle size={15} className="refresh-spinning" aria-hidden />{aiProcessingLabel}
+          </button>
+        ) : item.workflow_status === '待筛选' && (
           <button className="button button--primary" disabled={blocked || !canConfirm(item, activity)} onClick={() => void onConfirm(item)}>
             确认选题
           </button>

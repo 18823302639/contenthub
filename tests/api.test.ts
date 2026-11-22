@@ -142,18 +142,19 @@ describe('Mock API', () => {
     expect(row.draft_md).toBeUndefined()
   })
 
-  it('润色已有定稿的选题时，工作台优先读取的字段会显示新版', async () => {
+  it('允许留空触发模拟润色，更新初稿字段并保留旧定稿', async () => {
     const { api, step } = setup()
     const [item] = await step(api.listProductionItems({ status: '待人工终审' }))
-    const note = '强调可比较的测量条件'
+    const note = ''
     expect(item.final_md).toBeTruthy()
     await step(api.updateProductionItem(item.id, { revision_note: note, workflow_status: '需AI润色' }))
     await step(api.triggerWebhook('rewrite-draft', { production_id: item.id, revision_note: note }))
     await vi.advanceTimersByTimeAsync(1000)
     const updated = await step(api.getProductionItem(item.id))
     expect(updated.workflow_status).toBe('待人工终审')
-    expect(updated.final_md || updated.draft_md).toContain(note)
-    expect(updated.draft_md).toBe(item.draft_md)
+    expect(updated.draft_md).toContain('AI 主编自动挑刺')
+    expect(updated.draft_md).not.toBe(item.draft_md)
+    expect(updated.final_md).toBe(item.final_md)
   })
 
   it('与 JSON PATCH 一致，省略 undefined 字段并允许显式清空字符串', async () => {

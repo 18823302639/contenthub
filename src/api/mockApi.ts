@@ -74,7 +74,7 @@ export function createMockBackend() {
     }
     if (action === 'rewrite-draft' && (
       item.workflow_status !== '需AI润色' ||
-      item.revision_note !== payload.revision_note ||
+      (item.revision_note ?? '') !== payload.revision_note ||
       !(item.final_md?.trim() || item.draft_md?.trim())
     )) {
       throw new Error('请先准备稿件并保存本次修改意见及「需AI润色」状态。')
@@ -94,10 +94,9 @@ export function createMockBackend() {
           workflow_status: 'AI初稿完成',
         })
       } else {
-        const field = item.final_md?.trim() ? 'final_md' : 'draft_md'
-        const source = item[field]?.trim()
+        const source = item.final_md?.trim() || item.draft_md?.trim()
         updateProduction(item, {
-          [field]: `${source}\n\n## 模拟润色记录\n\n- 修改意见：${payload.revision_note.trim()}`,
+          draft_md: `${source}\n\n## 模拟润色记录\n\n- 修改意见：${payload.revision_note.trim() || 'AI 主编自动挑刺'}`,
           workflow_status: '待人工终审',
         })
       }

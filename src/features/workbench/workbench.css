@@ -19,6 +19,8 @@
   padding: 13px 15px;
 }
 .wb-note { display: grid; gap: 5px; }
+.wb-note-templates { display: flex; flex-wrap: wrap; gap: 5px; }
+.wb-note-templates .button { min-height: 27px; padding-inline: 7px; font-size: 11px; }
 .wb-note label { color: var(--muted); font-size: 12px; font-weight: 650; }
 .wb-note textarea, .wb-editor {
   width: 100%;
@@ -87,6 +89,8 @@
   color: var(--muted);
   font-size: 12px;
 }
+.wb-backup { display: grid; justify-items: start; gap: 10px; }
+.wb-backup + .wb-backup { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 14px; }
 .markdown-preview { min-width: 0; font-size: 14px; line-height: 1.76; overflow-wrap: anywhere; }
 .markdown-preview > * + * { margin-top: .8em; }
 .markdown-preview h1, .markdown-preview h2, .markdown-preview h3, .markdown-preview h4, .markdown-preview h5, .markdown-preview h6 {

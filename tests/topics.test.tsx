@@ -26,11 +26,44 @@ function choose(label: string, value: string) {
 
 afterEach(() => {
   cleanup()
+  vi.useRealTimers()
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
 })
 
 describe('选题看板', () => {
+  it('真实模式每 4 秒轮询初稿，在第 90 秒才提示等待超时', async () => {
+    const api = { ...createContentHubApi({}), mode: 'real' as const }
+    const items = await api.listProductionItems()
+    const pending = { ...items[0], workflow_status: '已确认-待核对' }
+    vi.spyOn(api, 'listProductionItems').mockResolvedValue(items)
+    vi.spyOn(api, 'updateProductionItem').mockResolvedValue(pending)
+    vi.spyOn(api, 'triggerWebhook').mockResolvedValue({ accepted: true, status: 202 })
+    let releaseLast!: (record: ProductionItem) => void
+    const lastRead = new Promise<ProductionItem>(resolve => { releaseLast = resolve })
+    const read = vi.spyOn(api, 'getProductionItem').mockImplementation(() => (
+      read.mock.calls.length === 22 ? lastRead : Promise.resolve(pending)
+    ))
+    vi.useFakeTimers()
+    openApp(api)
+    await act(async () => {})
+    const row = within(screen.getByRole('article', { name: retail }))
+    await act(async () => fireEvent.click(row.getByRole('button', { name: '确认选题' })))
+    expect(row.getByRole<HTMLButtonElement>('button', { name: /AI 处理中/ }).disabled).toBe(true)
+    await act(async () => vi.advanceTimersByTimeAsync(3999))
+    expect(read).not.toHaveBeenCalled()
+    await act(async () => vi.advanceTimersByTimeAsync(1))
+    expect(read).toHaveBeenCalledTimes(1)
+    await act(async () => vi.advanceTimersByTimeAsync(85_999))
+    expect(read).toHaveBeenCalledTimes(22)
+    expect(row.queryByText(/暂未读到初稿/)).toBeNull()
+    await act(async () => vi.advanceTimersByTimeAsync(1))
+    expect(row.getByText(/暂未读到初稿/)).toBeTruthy()
+    expect(row.queryByRole('button', { name: /AI 处理中/ })).toBeNull()
+    await act(async () => releaseLast({ ...pending, workflow_status: 'AI初稿完成' }))
+    expect(row.queryByText('AI初稿完成')).toBeNull()
+  })
+
   it('未知选题标签用灰色展示，可用原始值筛选且不执行未知状态的流转', async () => {
     const api = createContentHubApi({})
     const items = await api.listProductionItems()

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { HashRouter } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ContentHubApp } from '../src/app/ContentHubApp'
@@ -27,12 +27,132 @@ function press(label: string) {
 
 afterEach(() => {
   cleanup()
+  vi.useRealTimers()
   vi.restoreAllMocks()
+  vi.unstubAllGlobals()
   if (clipboardDescriptor) Object.defineProperty(navigator, 'clipboard', clipboardDescriptor)
   else Reflect.deleteProperty(navigator, 'clipboard')
 })
 
 describe('改稿台', () => {
+  it('快捷模板填入可编辑的完整文字，清空后仍发送空的修改意见', async () => {
+    const api = mount(3)
+    const trigger = vi.spyOn(api, 'triggerWebhook')
+    await editor()
+    const input = screen.getByRole<HTMLTextAreaElement>('textbox', { name: '修改意见' })
+    expect(input.placeholder).toBe('留空则由 AI 主编自动挑刺并去味重写；或点击上方快捷模板 / 输入具体意见')
+    for (const [label, phrase] of [
+      ['去研报/AI味', '每段不超过3行'],
+      ['公众号深度', '2000字左右'],
+      ['头条号快节奏', '1200字以内'],
+      ['逻辑拔高', '反常识结论+数据支撑+现实推演'],
+    ]) {
+      press(label)
+      expect(input.value).toContain(phrase)
+    }
+    enterNote('')
+    expect(input.value).toBe('')
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: 'AI 去味改稿' }).disabled).toBe(false)
+    press('AI 去味改稿')
+    await screen.findByText('Webhook 已受理，等待改稿回写。')
+    expect(trigger).toHaveBeenCalledExactlyOnceWith('rewrite-draft', { production_id: 3, revision_note: '' })
+  })
+
+  it('真实改稿以 4 秒节奏等待，先写终审状态仍继续等 60 秒后的稿件', async () => {
+    const api = { ...createContentHubApi({}), mode: 'real' as const }
+    let latest = await api.getProductionItem(4)
+    const read = vi.spyOn(api, 'getProductionItem').mockImplementation(async () => latest)
+    vi.spyOn(api, 'updateProductionItem').mockImplementation(async (_id, changes) => {
+      latest = { ...latest, ...changes }
+      return latest
+    })
+    vi.spyOn(api, 'triggerWebhook').mockResolvedValue({ accepted: true, status: 202 })
+    vi.useFakeTimers()
+    mount(4, api)
+    await act(async () => {})
+    await act(async () => press('AI 去味改稿'))
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: /AI 处理中/ }).disabled).toBe(true)
+    await act(async () => vi.advanceTimersByTimeAsync(3999))
+    expect(read).toHaveBeenCalledTimes(1)
+    await act(async () => vi.advanceTimersByTimeAsync(1))
+    expect(read).toHaveBeenCalledTimes(2)
+    await act(async () => vi.advanceTimersByTimeAsync(56_000))
+    expect(screen.queryByText(/暂未读到回写结果/)).toBeNull()
+    latest = { ...latest, workflow_status: '待人工终审' }
+    await act(async () => vi.advanceTimersByTimeAsync(4_000))
+    expect(screen.queryByText(/改稿结果已回写/)).toBeNull()
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: /AI 处理中/ }).disabled).toBe(true)
+    latest = { ...latest, draft_md: '# WF3 的新稿' }
+    await act(async () => vi.advanceTimersByTimeAsync(4_000))
+    expect(screen.queryByRole('button', { name: /AI 处理中/ })).toBeNull()
+    expect(screen.getByRole<HTMLTextAreaElement>('textbox', { name: 'Markdown 编辑器' }).value).toBe('# WF3 的新稿')
+  })
+
+  it('临近超时时手动刷新只读一次，改稿轮询仍在原第 90 秒停止', async () => {
+    const api = { ...createContentHubApi({}), mode: 'real' as const }
+    let record = await api.getProductionItem(3)
+    const read = vi.spyOn(api, 'getProductionItem').mockImplementation(async () => record)
+    vi.spyOn(api, 'updateProductionItem').mockImplementation(async (_id, updates) => {
+      record = { ...record, ...updates }
+      return record
+    })
+    const trigger = vi.spyOn(api, 'triggerWebhook').mockResolvedValue({ accepted: true, status: 202 })
+    vi.useFakeTimers()
+    mount(3, api)
+    await act(async () => {})
+    await act(async () => press('AI 去味改稿'))
+    await act(async () => vi.advanceTimersByTimeAsync(89_000))
+    expect(read).toHaveBeenCalledTimes(23)
+    await act(async () => press('刷新记录'))
+    expect(read).toHaveBeenCalledTimes(24)
+    expect(screen.queryByText(/暂未读到回写结果/)).toBeNull()
+    await act(async () => vi.advanceTimersByTimeAsync(1_000))
+    expect(screen.getByText(/暂未读到回写结果/)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /AI 处理中/ })).toBeNull()
+    await act(async () => vi.advanceTimersByTimeAsync(8_000))
+    expect(read).toHaveBeenCalledTimes(24)
+    expect(trigger).toHaveBeenCalledTimes(1)
+  })
+
+  it('复制全文同时写入安全的 HTML 和 Markdown，原始 Markdown 可单独复制', async () => {
+    class TestClipboardItem {
+      constructor(readonly flavors: Record<string, Blob | Promise<Blob>>) {}
+    }
+    vi.stubGlobal('ClipboardItem', TestClipboardItem)
+    const write = vi.fn<(items: TestClipboardItem[]) => Promise<void>>().mockResolvedValue(undefined)
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { write, writeText } })
+    mount(3)
+    const markdown = '# 标题\n\n一段 **加粗**。\n\n第二段。\n\n<script>danger()</script>\n\n[恶意链接](javascript:alert%281%29)'
+    fireEvent.change(await editor(), { target: { value: markdown } })
+    press('复制全文')
+    await screen.findByText('已复制全文（富文本）。')
+    const flavors = write.mock.calls[0][0][0].flavors
+    function read(blob: Blob) {
+      return new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(String(reader.result))
+        reader.onerror = () => reject(reader.error)
+        reader.readAsText(blob)
+      })
+    }
+    const html = await read(await flavors['text/html'])
+    expect(html).toContain('<h1>标题</h1>')
+    expect(html).toContain('<p>一段 <strong>加粗</strong>。</p>')
+    expect(html).toContain('<p>第二段。</p>')
+    expect(html).not.toMatch(/<script|javascript:/)
+    expect(await read(await flavors['text/plain'])).toBe(markdown)
+    expect(writeText).not.toHaveBeenCalled()
+    press('复制 Markdown')
+    await screen.findByText('已复制 Markdown。')
+    expect(writeText).toHaveBeenCalledExactlyOnceWith(markdown)
+    write.mockRejectedValueOnce(new Error('浏览器拒绝写入 HTML'))
+    press('复制全文')
+    await screen.findByText('已复制全文。')
+    expect(writeText).toHaveBeenCalledTimes(2)
+    expect(writeText).toHaveBeenLastCalledWith(markdown)
+  })
+
   it('AI 大纲 Tab 用 Markdown 渲染示例', async () => {
     mount(3)
     await editor()
@@ -170,8 +290,8 @@ describe('改稿台', () => {
     expect(Date.parse(row.published_at)).toBeGreaterThan(0)
   })
 
-  it('先保存意见再触发改稿，回写保留编辑，允许对照后手动采用', async () => {
-    const api = mount(3)
+  it('先保存意见再触发改稿，新初稿遮过旧定稿并备份等待期间的编辑', async () => {
+    const api = mount(4)
     const patch = vi.spyOn(api, 'updateProductionItem')
     const webhook = vi.spyOn(api, 'triggerWebhook')
     const draft = await editor()
@@ -179,16 +299,24 @@ describe('改稿台', () => {
     press('AI 去味改稿')
     expect(webhook).not.toHaveBeenCalled()
     await screen.findByText('修改意见已保存，正在请求 Webhook…')
-    expect(patch).toHaveBeenCalledWith(3, { revision_note: '补充对照组并减少套话', workflow_status: '需AI润色' })
+    expect(patch).toHaveBeenCalledWith(4, { revision_note: '补充对照组并减少套话', workflow_status: '需AI润色' })
     await screen.findByText('Webhook 已受理，等待改稿回写。')
-    expect(webhook).toHaveBeenCalledExactlyOnceWith('rewrite-draft', { production_id: 3, revision_note: '补充对照组并减少套话' })
+    expect(webhook).toHaveBeenCalledExactlyOnceWith('rewrite-draft', { production_id: 4, revision_note: '补充对照组并减少套话' })
     fireEvent.change(draft, { target: { value: '# 等待时补写的人工段落' } })
-    await screen.findByText('改稿结果已回写，当前编辑已保留。', {}, { timeout: 4500 })
-    expect((await editor()).value).toBe('# 等待时补写的人工段落')
-    fireEvent.click(screen.getByRole('tab', { name: '回写稿' }))
-    expect(screen.getByRole('tabpanel', { name: '回写稿' }).textContent).toContain('补充对照组并减少套话')
-    press('用回写稿替换当前编辑')
+    await screen.findByText(/改稿结果已回写，已加载最新初稿/, {}, { timeout: 4500 })
     expect((await editor()).value).toContain('补充对照组并减少套话')
+    fireEvent.click(screen.getByRole('link', { name: '返回选题看板' }))
+    const topic = await screen.findByRole('article', { name: '【模拟】用充电曲线估算服务区停留时间' })
+    fireEvent.click(within(topic).getByRole('link', { name: '进入改稿台' }))
+    expect((await editor()).value).toContain('补充对照组并减少套话')
+    await waitFor(() => expect(screen.getByRole<HTMLButtonElement>('button', { name: '刷新记录' }).disabled).toBe(false))
+    press('刷新记录')
+    await screen.findByText('已读取最新记录。')
+    expect((await editor()).value).toContain('补充对照组并减少套话')
+    fireEvent.click(screen.getByRole('tab', { name: '本地备份' }))
+    expect(screen.getByRole('tabpanel', { name: '本地备份' }).textContent).toContain('等待时补写的人工段落')
+    press('恢复这份备份')
+    expect((await editor()).value).toBe('# 等待时补写的人工段落')
   })
 
   it('保存回读保留请求途中追加的文本', async () => {
@@ -215,7 +343,7 @@ describe('改稿台', () => {
     press('刷新记录')
     await waitFor(() => expect((screen.getByRole('button', { name: '刷新记录' }) as HTMLButtonElement).disabled).toBe(false))
     expect(trigger).toHaveBeenCalledTimes(1)
-    expect((screen.getByRole('button', { name: 'AI 去味改稿' }) as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByRole('button', { name: /AI 去味改稿|AI 处理中/ }) as HTMLButtonElement).disabled).toBe(true)
   })
 
   it('保存回读失败不请求 Webhook，刷新时保留未保存编辑', async () => {
