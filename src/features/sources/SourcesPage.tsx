@@ -22,9 +22,11 @@ function SourceEntry({ row, compact, model }: { row: RssSource; compact: boolean
   const url = rssUrl(row.rss_url)
   const feedback = model.rowFeedback[row.id]
   const unavailable = model.loading || feedback?.kind === 'saving' || feedback?.kind === 'unverified'
+  const poolType = poolTypes.find(option => option === row.pool_type)
+  const name = row.name.trim() || '未命名信源'
   const group = (
-    <span className={row.pool_type === 'production' ? 'pill pill--violet' : 'pill pill--neutral'}>
-      {poolLabels[row.pool_type]}
+    <span className={poolType === 'production' ? 'source-group pill pill--violet' : 'source-group pill pill--neutral'}>
+      {poolType ? poolLabels[poolType] : row.pool_type || '未分组'}
     </span>
   )
   const link = url ? (
@@ -33,7 +35,7 @@ function SourceEntry({ row, compact, model }: { row: RssSource; compact: boolean
     </a>
   ) : <span className="source-invalid">链接无效</span>
   const control = (
-    <button type="button" className="source-switch" role="switch" aria-label={'启用 ' + row.name}
+    <button type="button" className="source-switch" role="switch" aria-label={'启用 ' + name}
       data-source-control={'switch-' + row.id}
       aria-checked={row.is_active} aria-disabled={unavailable} aria-describedby={feedback ? feedbackId : undefined}
       onClick={() => { if (!unavailable) void model.toggle(row) }}>
@@ -52,11 +54,11 @@ function SourceEntry({ row, compact, model }: { row: RssSource; compact: boolean
     return (
       <li className="source-card">
         <div className="source-card-header">
-          <h2>{row.name}</h2>
+          <h2>{name}</h2>
           {control}
         </div>
         {notice}
-        <div className="source-card-meta">{group}<span>{row.track_tag}</span></div>
+        <div className="source-card-meta">{group}<span>{row.track_tag || '未标注赛道'}</span></div>
         {link}
       </li>
     )
@@ -64,9 +66,9 @@ function SourceEntry({ row, compact, model }: { row: RssSource; compact: boolean
 
   return (
     <tr>
-      <th scope="row">{row.name}</th>
+      <th scope="row">{name}</th>
       <td>{group}</td>
-      <td>{row.track_tag}</td>
+      <td>{row.track_tag || '未标注赛道'}</td>
       <td>{link}</td>
       <td>{control}{notice}</td>
     </tr>
@@ -159,7 +161,7 @@ export function SourcesPage({ model }: { model: SourcesModel }) {
 
   function saved(source: RssSource | null, requestDialog: number | null) {
     if (!source || !visible.current || requestDialog !== activeDialog.current) return
-    if (pool && pool !== source.pool_type) choose(source.pool_type)
+    if (pool && pool !== source.pool_type) choose(poolTypes.find(option => option === source.pool_type))
     closeDialog()
   }
 

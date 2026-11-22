@@ -46,8 +46,8 @@ export function createContentHubApi(env: ContentHubEnv, fetcher: typeof fetch = 
     async listRadarItems({ minCommercialScore, minInfoGapScore } = {}) {
       const rows = await store.list('radar_pool')
       return rows.filter(row => (
-        (minCommercialScore === undefined || row.commercial_score >= minCommercialScore) &&
-        (minInfoGapScore === undefined || row.info_gap_score >= minInfoGapScore)
+        (minCommercialScore === undefined || (row.commercial_score !== null && row.commercial_score >= minCommercialScore)) &&
+        (minInfoGapScore === undefined || (row.info_gap_score !== null && row.info_gap_score >= minInfoGapScore))
       ))
     },
     async listAccountMetrics(since) {
@@ -57,6 +57,7 @@ export function createContentHubApi(env: ContentHubEnv, fetcher: typeof fetch = 
       const rows = await store.list('account_metrics')
       return rows.filter(row => dateTime(row.recorded_at) >= start)
     },
+    listPostMetrics: () => store.list('post_metrics'),
     createAccountMetric: metric => store.create('account_metrics', metric),
     async triggerWebhook(...request: WebhookRequest) {
       const [action, payload] = request

@@ -1,9 +1,9 @@
-import type { AccountMetric, PoolType, ProductionItem, RadarItem, RssSource, WorkflowStatus } from '../types/schema'
+import type { AccountMetric, Platform, PoolType, PostMetric, ProductionItem, RadarItem, RssSource, WorkflowStatus } from '../types/schema'
 
 export interface ProductionFilters {
   trackTag?: string
   minScore?: number
-  status?: WorkflowStatus
+  status?: string
 }
 
 export interface RadarFilters {
@@ -11,11 +11,13 @@ export interface RadarFilters {
   minInfoGapScore?: number
 }
 
-export type NewRssSource = Omit<RssSource, 'id' | 'created_at'>
-export type NewAccountMetric = Omit<AccountMetric, 'id'>
+export type NewRssSource = Omit<RssSource, 'id' | 'created_at' | 'pool_type'> & { pool_type: PoolType }
+export type NewAccountMetric = {
+  [Field in Exclude<keyof AccountMetric, 'id'>]: Field extends 'platform' ? Platform : NonNullable<AccountMetric[Field]>
+}
 export type ProductionUpdate = Partial<Pick<ProductionItem,
-  'workflow_status' | 'raw_content' | 'fact_check' | 'draft_md' | 'final_md' | 'revision_note' | 'published_at'
->>
+  'raw_content' | 'fact_check' | 'draft_md' | 'final_md' | 'revision_note' | 'published_at' | 'is_benchmark'
+> & { workflow_status: WorkflowStatus }>
 
 export interface WebhookPayloads {
   'fetch-and-draft': { production_id: number }
@@ -43,6 +45,7 @@ export interface ContentHubApi {
   listRadarItems(filters?: RadarFilters): Promise<RadarItem[]>
   /** since 为含该时间点的下界。 */
   listAccountMetrics(since?: string): Promise<AccountMetric[]>
+  listPostMetrics(): Promise<PostMetric[]>
   createAccountMetric(metric: NewAccountMetric): Promise<AccountMetric>
   triggerWebhook(...request: WebhookRequest): Promise<WebhookReceipt>
 }
@@ -52,13 +55,16 @@ export interface Tables {
   production_pool: ProductionItem
   radar_pool: RadarItem
   account_metrics: AccountMetric
+  post_metrics: PostMetric
 }
+
+type NewRecords = { rss_sources: NewRssSource; account_metrics: NewAccountMetric }
 
 export type TableName = keyof Tables
 
 export interface RecordStore {
   list<T extends TableName>(table: T): Promise<Tables[T][]>
   get<T extends TableName>(table: T, id: number): Promise<Tables[T]>
-  create<T extends 'rss_sources' | 'account_metrics'>(table: T, fields: Omit<Tables[T], 'id' | 'created_at'>): Promise<Tables[T]>
+  create<T extends keyof NewRecords>(table: T, fields: NewRecords[T]): Promise<Tables[T]>
   update<T extends TableName>(table: T, id: number, changes: Partial<Omit<Tables[T], 'id'>>): Promise<Tables[T]>
 }

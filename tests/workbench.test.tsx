@@ -33,6 +33,74 @@ afterEach(() => {
 })
 
 describe('改稿台', () => {
+  it('AI 大纲 Tab 用 Markdown 渲染示例', async () => {
+    mount(3)
+    await editor()
+    fireEvent.click(screen.getByRole('tab', { name: 'AI 大纲' }))
+    const panel = within(screen.getByRole('tabpanel', { name: 'AI 大纲' }))
+    expect(panel.getByRole('heading', { name: '留存率分析提纲' })).toBeTruthy()
+    expect(panel.getByRole('list')).toBeTruthy()
+  })
+
+  it('没有大纲时显示空态，标杆开关回读后同步看板且保留未保存编辑', async () => {
+    const api = mount(4)
+    const write = vi.spyOn(api, 'updateProductionItem')
+    const draft = await editor()
+    fireEvent.click(screen.getByRole('tab', { name: 'AI 大纲' }))
+    expect(screen.getByRole('tabpanel', { name: 'AI 大纲' }).textContent).toContain('暂无大纲')
+    fireEvent.change(draft, { target: { value: '# 未保存编辑' } })
+    const control = screen.getByRole('switch', { name: '标杆样本' })
+    expect(control.getAttribute('aria-checked')).toBe('false')
+    fireEvent.click(control)
+    expect(control.getAttribute('aria-disabled')).toBe('true')
+    fireEvent.click(control)
+    await screen.findByText('已标记为标杆样本。')
+    expect(control.getAttribute('aria-checked')).toBe('true')
+    expect((await editor()).value).toBe('# 未保存编辑')
+    expect(write).toHaveBeenCalledExactlyOnceWith(4, { is_benchmark: true })
+    fireEvent.click(screen.getByRole('link', { name: '返回选题看板' }))
+    const card = await screen.findByRole('article', { name: '【模拟】用充电曲线估算服务区停留时间' })
+    expect(within(card).getByText('标杆样本')).toBeTruthy()
+  })
+
+  it('标杆回读失败时保留旧开关状态，刷新后恢复操作', async () => {
+    const api = mount(4)
+    const actual = api.updateProductionItem
+    const write = vi.spyOn(api, 'updateProductionItem').mockImplementationOnce(async (id, changes) => {
+      await actual(id, changes)
+      throw new WriteReadbackError('production_pool', id, new Error('模拟回读中断'))
+    })
+    await editor()
+    const control = screen.getByRole('switch', { name: '标杆样本' })
+    fireEvent.click(control)
+    await screen.findByText(/写入已返回成功，但回读失败/)
+    expect(control.getAttribute('aria-checked')).toBe('false')
+    expect(control.getAttribute('aria-disabled')).toBe('true')
+    press('刷新记录')
+    await screen.findByText('已读取最新记录。')
+    expect(control.getAttribute('aria-checked')).toBe('true')
+    fireEvent.click(control)
+    await screen.findByText('已取消标杆样本。')
+    expect(control.getAttribute('aria-checked')).toBe('false')
+    expect(write).toHaveBeenNthCalledWith(2, 4, { is_benchmark: false })
+  })
+
+  it('未知流程状态仍可保存人工稿，暂不开放 AI 改稿与发布流转', async () => {
+    const api = createContentHubApi({})
+    const record = await api.getProductionItem(4)
+    vi.spyOn(api, 'getProductionItem').mockResolvedValueOnce({ ...record, workflow_status: '另行复核' })
+    mount(4, api)
+    const draft = await editor()
+    expect(screen.getByText('另行复核').classList.contains('pill--neutral')).toBe(true)
+    enterNote('修改开头')
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: 'AI 去味改稿' }).disabled).toBe(true)
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: '标记为已发布' }).disabled).toBe(true)
+    fireEvent.change(draft, { target: { value: '# 人工补充' } })
+    press('保存定稿')
+    await screen.findByText('定稿已保存。')
+  })
+
+
   it('加载原文与核查 Tab，空定稿使用初稿', async () => {
     mount(3)
     expect(screen.getByText('正在加载选题…')).toBeTruthy()

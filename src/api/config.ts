@@ -9,6 +9,7 @@ export interface ContentHubEnv {
   readonly VITE_NOCODB_PRODUCTION_POOL_TABLE_ID?: string
   readonly VITE_NOCODB_RADAR_POOL_TABLE_ID?: string
   readonly VITE_NOCODB_ACCOUNT_METRICS_TABLE_ID?: string
+  readonly VITE_NOCODB_POST_METRICS_TABLE_ID?: string
   readonly VITE_NOCODB_ID_FIELD?: string
 }
 
@@ -17,6 +18,7 @@ const tableKeys = {
   production_pool: 'VITE_NOCODB_PRODUCTION_POOL_TABLE_ID',
   radar_pool: 'VITE_NOCODB_RADAR_POOL_TABLE_ID',
   account_metrics: 'VITE_NOCODB_ACCOUNT_METRICS_TABLE_ID',
+  post_metrics: 'VITE_NOCODB_POST_METRICS_TABLE_ID',
 } as const
 
 export function readMode(env: ContentHubEnv): 'mock' | 'real' {

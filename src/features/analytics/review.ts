@@ -26,16 +26,17 @@ function accumulator(): Accumulator {
   return { views: null, impressions: null, revenue: null, ctrSum: 0, ctrWeight: 0 }
 }
 
-export function isCount(value: number) {
-  return Number.isSafeInteger(value) && value >= 0
+export function isCount(value: number | null): value is number {
+  return value !== null && Number.isSafeInteger(value) && value >= 0
 }
 
-export function isPercentage(value: number) {
-  return Number.isFinite(value) && value >= 0 && value <= 100
+export function isPercentage(value: number | null): value is number {
+  return value !== null && Number.isFinite(value) && value >= 0 && value <= 100
 }
 
 export function equalDailyValues(left: AccountMetric, right: Omit<AccountMetric, 'id'>) {
-  return dailyMetricKey(left) === dailyMetricKey(right) && left.views === right.views &&
+  const key = dailyMetricKey(left)
+  return key !== null && key === dailyMetricKey(right) && left.views === right.views &&
     left.impressions === right.impressions && left.ctr === right.ctr &&
     left.completion_rate === right.completion_rate && left.revenue === right.revenue
 }
@@ -49,7 +50,7 @@ function add(bucket: Accumulator, row: AccountMetric) {
       bucket.ctrSum += row.ctr * row.impressions
     }
   }
-  if (Number.isFinite(row.revenue)) bucket.revenue = (bucket.revenue ?? 0) + row.revenue
+  if (row.revenue !== null && Number.isFinite(row.revenue)) bucket.revenue = (bucket.revenue ?? 0) + row.revenue
 }
 
 function values(bucket: Accumulator): Values {
@@ -84,12 +85,16 @@ export function buildReview(
   for (const row of rows) {
     if (row.platform !== platform) continue
     const day = metricDay(row.recorded_at)
-    const key = dailyMetricKey(row)
-    if (day === null || key === null) {
+    if (day === null) {
       invalidDates++
       continue
     }
     if (!buckets.has(day)) continue
+    const key = dailyMetricKey(row)
+    if (key === null) {
+      invalidRows++
+      continue
+    }
     const group = grouped.get(key)
     if (group) group.push(row)
     else grouped.set(key, [row])

@@ -93,6 +93,21 @@ function sourceViewport(width: number) {
 }
 
 describe('RSS 信源管理', () => {
+  it('未知分组显示原值和灰色标签，原有筛选仍可用', async () => {
+    const api = createContentHubApi({})
+    const rows = await api.listRssSources()
+    vi.spyOn(api, 'listRssSources').mockResolvedValue(rows.map(row => row.id === 1
+      ? { ...row, pool_type: 'constructor' }
+      : row))
+    mount(api)
+    const first = within(await source(retail))
+    expect(first.getByText('constructor').classList.contains('pill--neutral')).toBe(true)
+    press('生产池')
+    expect(screen.queryByRole('row', { name: new RegExp(retail) })).toBeNull()
+    press('全部')
+    expect(await source(retail)).toBeTruthy()
+  })
+
   it('在桌面和手机间切换时每条信源只保留一个可操作的开关', async () => {
     const resize = sourceViewport(1440)
     mount()

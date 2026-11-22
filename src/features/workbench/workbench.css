@@ -2,6 +2,8 @@
 .wb-page-header p { overflow-wrap: anywhere; }
 .wb-header-actions, .wb-toolbar-buttons { display: flex; flex-wrap: wrap; gap: 7px; }
 .wb-header-actions { flex: none; }
+.wb-toolbar-buttons .wb-benchmark[aria-checked='true'] { border-color: #d7cff6; background: #efedfc; color: var(--accent); }
+.wb-benchmark > span { font-size: 11px; color: var(--muted); }
 .wb-toolbar, .wb-panel {
   min-width: 0;
   border: 1px solid var(--line);

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { WriteReadbackError } from '../../api'
 import type { ContentHubApi } from '../../api'
 import type { RecordWrites } from '../../app/useRecordWrites'
+import { isWorkflowStatus } from '../../types/schema'
 import type { ProductionItem } from '../../types/schema'
 
 const confirmedStatus = '已确认-待核对'
@@ -62,7 +63,7 @@ export function canConfirm(item: ProductionItem, activity?: TopicActivity) {
 }
 
 export function canAbandon(item: ProductionItem) {
-  return item.workflow_status !== '已发布' && item.workflow_status !== '已放弃'
+  return isWorkflowStatus(item.workflow_status) && item.workflow_status !== '已发布' && item.workflow_status !== '已放弃'
 }
 
 function message(error: unknown): string {

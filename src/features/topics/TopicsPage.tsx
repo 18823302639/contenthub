@@ -3,12 +3,11 @@ import { useEffect, useId } from 'react'
 import type { ReactNode } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { matchesProductionFilters } from '../../api'
-import { workflowStatuses } from '../../types/schema'
+import { productionTracks, workflowStatuses } from '../../types/schema'
 import { TopicCard, TopicFeedback } from './TopicCard'
 import { isActivityError, isMutationBlocked } from './useTopicBoard'
 import type { useTopicBoard } from './useTopicBoard'
 
-const tracks = ['商业数据', '汽车家电评测']
 const scores = ['1', '2', '3', '4', '5']
 
 function FilterField({ label, value, onChange, children }: {
@@ -35,14 +34,16 @@ export function TopicsPage({ board }: { board: ReturnType<typeof useTopicBoard> 
 
   useEffect(() => ensureLoaded(), [ensureLoaded])
 
-  const track = tracks.find(option => option === query.get('track')) ?? ''
+  const track = query.get('track') ?? ''
   const minimum = scores.find(option => option === query.get('score')) ?? ''
-  const status = workflowStatuses.find(option => option === query.get('status'))
+  const status = query.get('status') ?? ''
+  const tracks = new Set([...productionTracks, ...(items ?? []).map(item => item.track_tag), track].filter(Boolean))
+  const statuses = new Set([...workflowStatuses, ...(items ?? []).map(item => item.workflow_status), status].filter(Boolean))
   const filtersActive = Boolean(track || minimum || status)
   const visible = (items ?? []).filter(item => matchesProductionFilters(item, {
     trackTag: track || undefined,
     minScore: minimum ? Number(minimum) : undefined,
-    status,
+    status: status || undefined,
   }))
 
   const visibleIds = new Set(visible.map(item => item.id))
@@ -79,15 +80,15 @@ export function TopicsPage({ board }: { board: ReturnType<typeof useTopicBoard> 
       <div className="filters" aria-label="筛选选题" role="group">
         <FilterField label="赛道" value={track} onChange={value => select('track', value)}>
           <option value="">全部赛道</option>
-          {tracks.map(option => <option key={option}>{option}</option>)}
+          {Array.from(tracks, option => <option key={option} value={option}>{option}</option>)}
         </FilterField>
         <FilterField label="最低评分" value={minimum} onChange={value => select('score', value)}>
           <option value="">不限评分</option>
           {scores.map(option => <option value={option} key={option}>{option} 分及以上</option>)}
         </FilterField>
-        <FilterField label="流程状态" value={status ?? ''} onChange={value => select('status', value)}>
+        <FilterField label="流程状态" value={status} onChange={value => select('status', value)}>
           <option value="">全部状态</option>
-          {workflowStatuses.map(option => <option key={option}>{option}</option>)}
+          {Array.from(statuses, option => <option key={option} value={option}>{option}</option>)}
         </FilterField>
         {filtersActive && visible.length > 0 && <button className="button button--quiet clear-filters" onClick={clear}>清除筛选</button>}
       </div>

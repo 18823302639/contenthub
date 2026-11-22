@@ -31,6 +31,7 @@ export function calendarDayStart(day: string) {
 }
 
 export function dailyMetricKey(row: Pick<AccountMetric, 'production_id' | 'platform' | 'recorded_at'>) {
+  if (row.production_id === null || !Number.isSafeInteger(row.production_id) || row.production_id <= 0) return null
   const day = metricDay(row.recorded_at)
   return day === null ? null : JSON.stringify([row.production_id, row.platform, day])
 }

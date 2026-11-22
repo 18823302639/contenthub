@@ -1,6 +1,8 @@
 export const poolTypes = ['production', 'radar'] as const
 export type PoolType = (typeof poolTypes)[number]
 
+export const productionTracks = ['商业数据', '汽车家电评测'] as const
+
 export const complianceRisks = ['低', '中', '高'] as const
 export type ComplianceRisk = (typeof complianceRisks)[number]
 
@@ -15,6 +17,10 @@ export const workflowStatuses = [
 ] as const
 export type WorkflowStatus = (typeof workflowStatuses)[number]
 
+export function isWorkflowStatus(value: string): value is WorkflowStatus {
+  return workflowStatuses.some(status => status === value)
+}
+
 export const demandTypes = ['避坑决策', '猎奇反常识', '效率提升', '情绪共鸣'] as const
 export type DemandType = (typeof demandTypes)[number]
 
@@ -25,7 +31,7 @@ export interface RssSource {
   id: number
   name: string
   rss_url: string
-  pool_type: PoolType
+  pool_type: string
   track_tag: string
   is_active: boolean
   created_at: string
@@ -39,12 +45,14 @@ export interface ProductionItem {
   zh_title: string
   url: string
   key_data_points: string
-  /** 恰好三个备选标题。 */
+  /** 使用可读取的备选标题，字段缺失时为空数组。 */
   suggested_titles: string[]
-  /** 1–5 分。 */
-  score: number
-  compliance_risk: ComplianceRisk
-  workflow_status: WorkflowStatus
+  /** 1–5 分，缺失或无效时为 null。 */
+  score: number | null
+  compliance_risk: string
+  workflow_status: string
+  ai_outline: string | null
+  is_benchmark: boolean
   raw_content?: string
   fact_check?: string
   draft_md?: string
@@ -62,25 +70,28 @@ export interface RadarItem {
   summary_zh: string
   url: string
   domain_tag: string
-  demand_type: DemandType
-  commercial_score: number
-  info_gap_score: number
+  demand_type: string
+  commercial_score: number | null
+  info_gap_score: number | null
   evergreen: boolean
   compliance_risk: string
 }
 
 export interface AccountMetric {
   id: number
-  production_id: number
+  production_id: number | null
   title: string
-  platform: Platform
-  impressions: number
-  views: number
+  platform: string
+  impressions: number | null
+  views: number | null
   /** 百分数，25 表示 25%。 */
-  ctr: number
+  ctr: number | null
   /** 百分数，60 表示 60%。 */
-  completion_rate: number
+  completion_rate: number | null
   /** 单位为元。 */
-  revenue: number
+  revenue: number | null
   recorded_at: string
 }
+
+/** post_metrics 的只读投影，目前读取与 account_metrics 同名的字段。 */
+export type PostMetric = AccountMetric

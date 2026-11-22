@@ -1,14 +1,16 @@
 import { describe, expect, it } from 'vitest'
 import { createContentHubApi } from '../src/api'
+import type { NewAccountMetric } from '../src/api'
 import { buildReview } from '../src/features/analytics/review'
 import type { AccountMetric } from '../src/types/schema'
 import { calendarDay, metricDay } from '../src/utils/metricDays'
 
 const now = Date.parse('2026-11-20T16:00:00Z')
-const base: AccountMetric = {
-  id: 1, production_id: 5, title: '示例', platform: '公众号', impressions: 100, views: 8,
+const baseInput: NewAccountMetric = {
+  production_id: 5, title: '示例', platform: '公众号', impressions: 100, views: 8,
   ctr: 10, completion_rate: 20, revenue: 2, recorded_at: '2026-11-20T16:00:00Z',
 }
+const base: AccountMetric = { id: 1, ...baseInput }
 const row = (changes: Partial<AccountMetric>) => ({ ...base, ...changes })
 
 describe('UTC+8 单日运营口径', () => {
@@ -80,6 +82,15 @@ describe('UTC+8 单日运营口径', () => {
     expect(review.totals).toEqual({ views: null, impressions: null, ctr: null, revenue: null })
   })
 
+  it('忽略缺失内容主键的记录，并区分缺失数值和零', () => {
+    const review = buildReview([
+      row({ production_id: null, views: 400 }),
+      row({ id: 2, views: null, impressions: 0, ctr: null, revenue: null }),
+    ], '公众号', 7, now)
+    expect(review.totals).toEqual({ views: null, impressions: 0, ctr: null, revenue: null })
+    expect(review.invalidRows).toBe(2)
+  })
+
   it('可识别明确附有时区的 ISO 分钟时间戳', () => {
     expect(metricDay('2026-11-20T16:00Z')).toBe('2026-11-21')
     expect(metricDay('2026-11-20T16:00')).toBeNull()
@@ -87,7 +98,7 @@ describe('UTC+8 单日运营口径', () => {
 
   it('Mock 存储在并发提交时也拒绝同一内容、平台和 UTC+8 日期', async () => {
     const api = createContentHubApi({})
-    const { id: _id, ...input } = row({ recorded_at: '2024-01-02T16:00:00Z' })
+    const input = { ...baseInput, recorded_at: '2024-01-02T16:00:00Z' }
     const results = await Promise.allSettled([
       api.createAccountMetric(input),
       api.createAccountMetric({ ...input, recorded_at: '2024-01-03T01:00:00+08:00' }),

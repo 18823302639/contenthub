@@ -11,6 +11,7 @@ export function createWebhookClient(env: ContentHubEnv, fetcher: typeof fetch) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     })
+    // request 已校验 HTTP 2xx。n8n 可以返回任意响应体，也可以没有响应体。
     return { accepted: true, status: response.status }
   }
 }

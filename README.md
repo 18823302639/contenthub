@@ -76,6 +76,7 @@ npm run preview -- --host 127.0.0.1
 ## 改稿台用法
 
 - 在看板选择「进入改稿台」，也可直接打开 `#/workbench/3` 查看 Mock 初稿，或打开 `#/workbench/4` 查看已有定稿。左栏可切换原文素材与 AI 事实核查清单。窄屏使用工具栏的「跳到稿件」直达当前稿件视图。
+- 「AI 大纲」标签页以 Markdown 展示 `production_pool.ai_outline`。工具栏的「标杆样本」开关只写入 `is_benchmark`，回读确认后更新改稿台和看板徽章。
 - 右栏优先显示 `final_md`，定稿为空时使用 `draft_md`。空稿可直接输入。预览支持 GFM 表格和任务清单，跳过原始 HTML，远程图片显示替代文字。复制对象始终是当前编辑区全文。
 - 「保存定稿」只写入 `final_md`。保存提交后仍可继续输入，回读保留随后输入的内容。「标记为已发布」针对已经保存的定稿，仅更新 `workflow_status` 和 `published_at`。看板与改稿台按选题共用写入锁。
 - 填写修改意见并点击「AI 去味改稿」。界面先保存 `revision_note` 与「需AI润色」，确认回读后发出一次 `rewrite-draft`。Webhook 受理后只读查询回写。若读到对应意见和「待人工终审」，改稿台才显示结果已回写。提交受理后返回看板，有限次数的查询仍可更新已打开过的看板。进入本来就处于待回写状态的记录时，改稿台也会只读跟进。
@@ -184,6 +185,7 @@ ContentHub/
 | 信源列表、启停和新增 | `listRssSources(poolType?)`、`setRssSourceActive(id, active)`、`createRssSource(source)` |
 | 雷达机会 | `listRadarItems({ minCommercialScore, minInfoGapScore })`，两个下限均为含等号 |
 | 运营数据 | `listAccountMetrics(since?)`、`createAccountMetric(metric)`，`since` 为含该时间点的下界 |
+| 帖子指标，只读 | `listPostMetrics()`，读取与运营数据同名的字段 |
 | AI 动作 | `triggerWebhook(action, payload)` |
 
 列表由 API 层取得各页记录后统一筛选。运营指标中的 CTR 和完读率使用百分数，`25` 表示 25%，收入使用元。时间字段建议提供带时区的 ISO 8601 字符串。标记发布时应在同一次更新提交 `workflow_status: '已发布'` 和 `published_at`。
@@ -204,10 +206,12 @@ ContentHub/
 | `production_pool` | `VITE_NOCODB_PRODUCTION_POOL_TABLE_ID` |
 | `radar_pool` | `VITE_NOCODB_RADAR_POOL_TABLE_ID` |
 | `account_metrics` | `VITE_NOCODB_ACCOUNT_METRICS_TABLE_ID` |
+| `post_metrics` | `VITE_NOCODB_POST_METRICS_TABLE_ID`，仅调用 `listPostMetrics()` 时配置 |
 
 - NocoDB 以 `VITE_NOCODB_API_URL` 为 v2 基础地址。客户端自动发送 `xc-token`，使用 `GET /tables/{tableId}/records` 的 `offset`、`limit` 和 `pageInfo.isLastPage` 遍历记录。分页按主键排序，偏移量依返回的实际条数递增。 [NocoDB v2 数据 API](https://nocodb.com/apis/v2/data)
-- 单条读取使用 `GET /tables/{tableId}/records/{id}`。`POST` 新增和 `PATCH` 更新都发送一项记录数组到记录集合。PATCH 包含主键；写入成功后按回执主键回读。四表使用同一个 NocoDB 主键显示名，默认 `id`，可将 `VITE_NOCODB_ID_FIELD` 设为 `Id` 等实际显示名。前端模型统一用 `id`。 [NocoDB v2 数据 API](https://nocodb.com/apis/v2/data)
-- 新建信源由存储侧生成主键和 `created_at`。运营数据的 `production_id` 应暴露为数值字段。适配器兼容真正的三元素标题数组和保存了该 JSON 数组的文本字段。可空稿件字段在前端省略，未发布的空日期映射为 `''`。
+- 单条读取使用 `GET /tables/{tableId}/records/{id}`。`POST` 新增和 `PATCH` 更新都发送一项记录数组到记录集合。PATCH 包含主键，写入成功后按回执主键回读。NocoDB 主键显示名默认 `id`，可将 `VITE_NOCODB_ID_FIELD` 设为实际显示名，例如 `Id`。前端模型统一使用数值型 `id`。 [NocoDB v2 数据 API](https://nocodb.com/apis/v2/data)
+- 读取时，未知选项保留原文本并在控制台提示。标题接受数组、JSON 数组或单条文本。缺失文本和日期为空字符串，`ai_outline` 缺失时为 `null`，无效数值按缺失处理。布尔值兼容 `true`、`false`、`1`、`0` 及其字符串。列表内无有效主键的记录会跳过，分页仍按原始条数前进。
+- `post_metrics` 只读接口按同名字段兼容 `production_id`、`platform`、展现、阅读、CTR、完读率、收益和记录日期。项目没有这张表的专属列定义，同名字段以外的列需要确认实际映射后才可使用。运营页继续查询 `account_metrics`。
 - n8n 以 `VITE_N8N_WEBHOOK_BASE_URL` 为基础地址，JSON body 通过 POST 发往 `${VITE_N8N_WEBHOOK_BASE_URL}/${action}`。此接口的回执只表示收到 HTTP 2xx，业务步骤的实际完成需要查看 NocoDB 记录。 [n8n Webhook](https://docs.n8n.io/integrations/builtin/core-nodes/n8n-nodes-base.webhook/)
 
 真实部署待实测项目包括 PostgreSQL 外部表在 NocoDB 中暴露的字段名和类型、主键和创建时间默认值、标题 JSON 与日期的实际序列化、单条写入回执及分页上限，以及已激活的 n8n 工作流对两个 payload 的解析、鉴权和写回状态。接口测试使用合成响应，未连接真实 NocoDB 和 n8n。

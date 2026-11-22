@@ -1,6 +1,7 @@
 import { ArrowUpRight, Star } from 'lucide-react'
 import { useId } from 'react'
 import { Link, useLocation } from 'react-router-dom'
+import { complianceRisks, isWorkflowStatus, productionTracks } from '../../types/schema'
 import type { ProductionItem, WorkflowStatus } from '../../types/schema'
 import { externalUrl } from '../../utils/externalUrl'
 import { canAbandon, canConfirm, describeActivity, isActivityError, isMutationBlocked } from './useTopicBoard'
@@ -39,18 +40,27 @@ export function TopicCard({ item, activity, writeBusy, onConfirm, onAbandon }: {
   const { search } = useLocation()
   const url = externalUrl(item.url)
   const blocked = writeBusy || isMutationBlocked(activity)
+  const risk = complianceRisks.find(option => option === item.compliance_risk)
+  const statusTone = isWorkflowStatus(item.workflow_status) ? statusTones[item.workflow_status] : 'neutral'
+  const knownTrack = productionTracks.some(track => track === item.track_tag)
 
   return (
     <article className="topic-card" aria-labelledby={headingId}>
       <div className="topic-card-header">
-        <span className="topic-track"><span aria-hidden />{item.track_tag}</span>
-        <span className={`pill pill--${statusTones[item.workflow_status]}`}>{item.workflow_status}</span>
+        {knownTrack ? <span className="topic-track"><span aria-hidden />{item.track_tag}</span>
+          : <span className="pill pill--neutral">{item.track_tag || '未标注赛道'}</span>}
+        <span className={'pill pill--' + statusTone}>{item.workflow_status || '未标注状态'}</span>
       </div>
-      <h2 id={headingId}>{item.zh_title}</h2>
+      <h2 id={headingId}>{item.zh_title.trim() || item.raw_title.trim() || '未命名选题'}</h2>
       <p className="topic-source">{item.source_name}</p>
       <div className="topic-meta">
-        <span className="pill pill--score" title="选题评分"><Star size={13} aria-hidden />{item.score} / 5</span>
-        <span className={`pill pill--${riskTones[item.compliance_risk]}`}>{item.compliance_risk}风险</span>
+        <span className={'pill pill--' + (item.score === null ? 'neutral' : 'score')} title="选题评分">
+          <Star size={13} aria-hidden />{item.score === null ? '未评分' : item.score + ' / 5'}
+        </span>
+        <span className={'pill pill--' + (risk ? riskTones[risk] : 'neutral')}>
+          {risk ? risk + '风险' : item.compliance_risk || '风险未标注'}
+        </span>
+        {item.is_benchmark && <span className="pill pill--violet">标杆样本</span>}
         {url && <a className="topic-origin" href={url} target="_blank" rel="noopener noreferrer">原文<ArrowUpRight size={14} aria-hidden /></a>}
       </div>
       <div className="topic-summary">

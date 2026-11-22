@@ -10,6 +10,7 @@ const env = {
   VITE_NOCODB_PRODUCTION_POOL_TABLE_ID: 'mtestproduct1234',
   VITE_NOCODB_RADAR_POOL_TABLE_ID: 'mtestradar123456',
   VITE_NOCODB_ACCOUNT_METRICS_TABLE_ID: 'mtestmetrics1234',
+  VITE_NOCODB_POST_METRICS_TABLE_ID: 'mtestpost123456',
   VITE_NOCODB_ID_FIELD: 'Id',
 }
 
@@ -190,11 +191,103 @@ describe('Mock API', () => {
     const opportunities = await step(api.listRadarItems({ minCommercialScore: 4, minInfoGapScore: 4 }))
     expect(opportunities.length).toBeGreaterThan(0)
     expect(opportunities.length).toBeLessThan((await step(api.listRadarItems())).length)
-    expect(opportunities.every(row => row.commercial_score >= 4 && row.info_gap_score >= 4)).toBe(true)
+    expect(opportunities.every(row => (row.commercial_score ?? 0) >= 4 && (row.info_gap_score ?? 0) >= 4)).toBe(true)
   })
 })
 
 describe('NocoDB v2 与真实模式', () => {
+  it('保留选题的未知枚举和赛道，容忍文本空值与数字字符串', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const value = {
+        ...production, Id: '7', score: '4', compliance_risk: '低风险',
+        workflow_status: '自动初审', track_tag: '新赛道', key_data_points: null,
+        fact_check: ['错误类型'], final_md: null, created_at: null,
+      }
+      const api = createContentHubApi(env, vi.fn<typeof fetch>().mockResolvedValueOnce(Response.json(value)))
+      const row = await api.getProductionItem(7)
+      expect(row).toMatchObject({
+        id: 7, score: 4, compliance_risk: '低风险', workflow_status: '自动初审',
+        track_tag: '新赛道', key_data_points: '', created_at: '', published_at: '',
+      })
+      expect(row).toMatchObject({ fact_check: '', final_md: '' })
+      for (const field of ['compliance_risk', 'workflow_status', 'track_tag', 'fact_check']) {
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining(field))
+      }
+    } finally { warn.mockRestore() }
+  })
+
+  it.each([
+    [['一', '二'], ['一', '二']],
+    ['["一","二"]', ['一', '二']],
+    ['普通标题', ['普通标题']],
+    ['"JSON 单条标题"', ['JSON 单条标题']],
+    ['[坏掉的 JSON', []],
+    [[null, '可用标题', 42], ['可用标题']],
+    [null, []],
+  ])('兼容标题字段 %j', async (value, titles) => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const api = createContentHubApi(env, vi.fn<typeof fetch>().mockResolvedValueOnce(Response.json({
+        ...production, score: '超出范围', suggested_titles: value,
+      })))
+      await expect(api.getProductionItem(7)).resolves.toMatchObject({ suggested_titles: titles, score: null })
+    } finally { warn.mockRestore() }
+  })
+
+  it('隔离损坏记录并以原始页长计算下一页，结构错误和无主键单条仍失败', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const fetcher = vi.fn<typeof fetch>()
+        .mockResolvedValueOnce(page([null, { name: '没有主键' }, { ...source, pool_type: '另一个池', is_active: '0' }], false))
+        .mockResolvedValueOnce(page([{ Id: '13', name: '后续记录', is_active: 1 }]))
+        .mockResolvedValueOnce(Response.json({ list: {}, pageInfo: { isLastPage: true } }))
+        .mockResolvedValueOnce(Response.json({ ...production, Id: null }))
+      const api = createContentHubApi(env, fetcher)
+      await expect(api.listRssSources()).resolves.toMatchObject([
+        { id: 12, is_active: false, pool_type: '另一个池' },
+        { id: 13, is_active: true, rss_url: '', created_at: '' },
+      ])
+      expect(new URL(String(fetcher.mock.calls[1][0])).searchParams.get('offset')).toBe('3')
+      expect(warn.mock.calls.filter(([message]) => String(message).includes('已跳过'))).toHaveLength(2)
+      await expect(api.listRssSources()).rejects.toThrow('分页')
+      await expect(api.getProductionItem(7)).rejects.toThrow('主键')
+    } finally { warn.mockRestore() }
+  })
+
+  it('雷达分数和布尔值可以转换，有缺失分数的记录不进入阈值结果', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const api = createContentHubApi(env, vi.fn<typeof fetch>().mockResolvedValueOnce(page([
+        { Id: 1, demand_type: '新需求', commercial_score: '4', info_gap_score: '4.5', evergreen: 'TRUE' },
+        { Id: 2, commercial_score: null, info_gap_score: '5', evergreen: 0 },
+      ])))
+      await expect(api.listRadarItems({ minCommercialScore: 4, minInfoGapScore: 4 })).resolves.toMatchObject([
+        { id: 1, demand_type: '新需求', commercial_score: 4, info_gap_score: 4.5, evergreen: true },
+      ])
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('demand_type'))
+    } finally { warn.mockRestore() }
+  })
+
+  it('两种运营表采用相同的容错投影，保留实际零并用 null 表示无效数字', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const value = {
+        Id: '4', production_id: '7', platform: '新平台', impressions: '0', views: '4',
+        ctr: '无', completion_rate: null, revenue: '12.5', recorded_at: null,
+      }
+      const fetcher = vi.fn<typeof fetch>()
+        .mockResolvedValueOnce(page([value]))
+        .mockResolvedValueOnce(page([{ ...value, production_id: '无效' }]))
+      const api = createContentHubApi(env, fetcher)
+      const expected = { id: 4, platform: '新平台', title: '', impressions: 0, views: 4,
+        ctr: null, completion_rate: null, revenue: 12.5, recorded_at: '' }
+      await expect(api.listAccountMetrics()).resolves.toMatchObject([{ ...expected, production_id: 7 }])
+      await expect(api.listPostMetrics()).resolves.toMatchObject([{ ...expected, production_id: null }])
+      expect(new URL(String(fetcher.mock.calls[1][0])).pathname).toBe('/api/v2/tables/mtestpost123456/records')
+    } finally { warn.mockRestore() }
+  })
+
   it('旧配置缺省使用 Mock，只有明确 false 切到真实模式，拼错会报错', () => {
     expect(createContentHubApi({}).mode).toBe('mock')
     expect(createContentHubApi(env).mode).toBe('real')
@@ -247,8 +340,7 @@ describe('NocoDB v2 与真实模式', () => {
     const api = createContentHubApi(env, fetcher)
     const row = await api.getProductionItem(7)
     expect(row).toMatchObject({ id: 7, suggested_titles: ['标题一', '标题二', '标题三'], published_at: '' })
-    expect(row).not.toHaveProperty('raw_content')
-    expect(row).not.toHaveProperty('draft_md')
+    expect(row).toMatchObject({ raw_content: '', draft_md: '' })
     expect(row).not.toHaveProperty('Id')
     expect(fetcher.mock.calls[0][0]).toBe('https://nocodb.example.invalid/api/v2/tables/mtestproduct1234/records/7')
   })
@@ -273,6 +365,54 @@ describe('NocoDB v2 与真实模式', () => {
     expect(createdUrl).toBe(patchUrl + '/13')
   })
 
+  it.each([[true, true], [false, false], [1, true], [0, false], ['1', true], ['0', false], [null, false]])(
+    '标杆样本字段 %j 兼容 NocoDB 的返回值',
+    async (stored, normalized) => {
+      const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(Response.json({
+        ...production, ai_outline: '# 提纲', is_benchmark: stored,
+      }))
+      await expect(createContentHubApi(env, fetcher).getProductionItem(7)).resolves.toMatchObject({
+        ai_outline: '# 提纲', is_benchmark: normalized,
+      })
+    },
+  )
+
+  it('标杆样本单独写入布尔字段，并用真实回读更新状态', async () => {
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json([{ Id: '7' }]))
+      .mockResolvedValueOnce(Response.json({ ...production, ai_outline: null, is_benchmark: '1' }))
+    await expect(createContentHubApi(env, fetcher).updateProductionItem(7, { is_benchmark: true }))
+      .resolves.toMatchObject({ ai_outline: null, is_benchmark: true })
+    expect(fetcher.mock.calls[0][1]).toMatchObject({
+      method: 'PATCH', body: JSON.stringify([{ is_benchmark: true, Id: 7 }]),
+    })
+  })
+
+  it.each([undefined, '不可读'])('取消标杆时，回读没有可识别的值 %j 则不能确认成功', async (value) => {
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json([{ Id: 7 }]))
+      .mockResolvedValueOnce(Response.json({ ...production, is_benchmark: value }))
+    await expect(createContentHubApi(env, fetcher).updateProductionItem(7, { is_benchmark: false }))
+      .rejects.toMatchObject({ name: 'WriteReadbackError', recordId: 7 })
+    expect(fetcher).toHaveBeenCalledTimes(2)
+  })
+
+  it('源表停用回读缺字段也不能冒充成功，显式 null 则表示未勾选', async () => {
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json([{ Id: 12 }]))
+      .mockResolvedValueOnce(Response.json({ ...source, is_active: undefined }))
+      .mockResolvedValueOnce(Response.json([{ Id: 12 }]))
+      .mockResolvedValueOnce(Response.json({ ...source, is_active: null }))
+    const api = createContentHubApi(env, fetcher)
+    await expect(api.setRssSourceActive(12, false)).rejects.toMatchObject({ name: 'WriteReadbackError', recordId: 12 })
+    await expect(api.setRssSourceActive(12, false)).resolves.toMatchObject({ is_active: false })
+  })
+
+  it('单条读取的有效主键与请求不同时仍视为结构错误', async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(Response.json({ ...production, Id: '8' }))
+    await expect(createContentHubApi(env, fetcher).getProductionItem(7)).rejects.toThrow('主键与请求不一致')
+  })
+
   it('区分已写入但回读失败，且不自动重复写入', async () => {
     const fetcher = vi.fn<typeof fetch>()
       .mockResolvedValueOnce(Response.json([{ Id: 12 }]))
@@ -284,6 +424,18 @@ describe('NocoDB v2 与真实模式', () => {
 })
 
 describe('n8n Webhook', () => {
+  it('接受 n8n 默认 JSON、非 JSON 响应与空的 2xx 回执', async () => {
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ message: 'Workflow was started' }))
+      .mockResolvedValueOnce(new Response('accepted', { status: 299 }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+    const api = createContentHubApi(env, fetcher)
+    for (const status of [200, 299, 204]) {
+      await expect(api.triggerWebhook('fetch-and-draft', { production_id: 7 }))
+        .resolves.toEqual({ accepted: true, status })
+    }
+  })
+
   it('对两个动作各 POST JSON 到所配置路径，只返回受理回执', async () => {
     const fetcher = vi.fn<typeof fetch>()
       .mockResolvedValueOnce(new Response('queued', { status: 202 }))

@@ -23,7 +23,7 @@ const indicators = [
 ] as const
 
 function Radar({ model }: { model: AnalyticsModel['radar'] }) {
-  const opportunities = model.rows?.filter(row => row.commercial_score >= 4 && row.info_gap_score >= 4)
+  const opportunities = model.rows?.filter(row => (row.commercial_score ?? -Infinity) >= 4 && (row.info_gap_score ?? -Infinity) >= 4)
 
   return (
     <section className="analytics-radar" aria-labelledby="radar-title">
@@ -49,11 +49,11 @@ function RadarCard({ row }: { row: RadarItem }) {
   return (
     <article className="radar-card">
       <div className="radar-tags">
-        <span className="pill pill--violet">{row.domain_tag}</span>
-        <span className="pill pill--neutral">{row.demand_type}</span>
+        <span className={row.domain_tag ? 'pill pill--violet' : 'pill pill--neutral'}>{row.domain_tag || '未标注领域'}</span>
+        <span className="pill pill--neutral">{row.demand_type || '未标注需求'}</span>
         {row.evergreen && <span className="pill pill--green">常青</span>}
       </div>
-      <h3>{row.summary_zh}</h3>
+      <h3>{row.summary_zh.trim() || row.raw_title.trim() || '未命名雷达机会'}</h3>
       <p className="radar-risk">合规风险：{row.compliance_risk || '待核对'}</p>
       <div className="radar-score">
         <span>商业价值 <strong>{row.commercial_score}</strong></span>
@@ -104,7 +104,8 @@ export function AnalyticsPage({ model }: { model: AnalyticsModel }) {
 
   function showRecordedDate(saved: AccountMetric | null, submittedDialog: number | null) {
     if (!saved || !sameView.current || submittedDialog !== activeDialog.current) return
-    setPlatform(saved.platform)
+    const savedPlatform = platforms.find(item => item === saved.platform)
+    if (savedPlatform) setPlatform(savedPlatform)
     const date = metricDay(saved.recorded_at)
     setHiddenDate(date !== null && date < firstDay)
     closeDialog()
@@ -182,7 +183,7 @@ export function AnalyticsPage({ model }: { model: AnalyticsModel }) {
             <ul className="topic-feedback topic-feedback--warning metric-data-notes" aria-label="数据核对提示">
               {review.unknownRows > 0 && <li>历史记录口径未核对，已排除 {review.unknownRows} 条。</li>}
               {review.invalidDates > 0 && <li>{review.invalidDates} 条记录无法确定 UTC+8 日期。</li>}
-              {review.invalidRows > 0 && <li>{review.invalidRows} 条记录的部分指标无效，汇总仅计可用值。</li>}
+              {review.invalidRows > 0 && <li>{review.invalidRows} 条记录的指标或内容关联无效，汇总仅计可用数据。</li>}
               {review.duplicateGroups > 0 && <li>{review.duplicateGroups} 组同日相同记录各计一次。</li>}
               {review.conflictingGroups > 0 && <li>已隔离 {review.conflictingGroups} 组同日冲突记录。</li>}
             </ul>

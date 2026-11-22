@@ -1,10 +1,11 @@
-import { ArrowDown, ArrowLeft, ArrowUpRight, Clipboard, RefreshCw, Save, Sparkles } from 'lucide-react'
+import { ArrowDown, ArrowLeft, ArrowUpRight, Bookmark, Clipboard, RefreshCw, Save, Sparkles } from 'lucide-react'
 import { useId, useRef, useState } from 'react'
 import type { RefObject } from 'react'
 import { Link, useLocation, useParams } from 'react-router-dom'
 import type { To } from 'react-router-dom'
 import type { RecordWrites } from '../../app/useRecordWrites'
 import type { ContentHubApi } from '../../api'
+import { isWorkflowStatus } from '../../types/schema'
 import type { ProductionItem } from '../../types/schema'
 import { externalUrl } from '../../utils/externalUrl'
 import { MarkdownPreview } from './MarkdownPreview'
@@ -22,6 +23,7 @@ type Tab<T extends string> = { value: T; label: string }
 const sourceTabs = [
   { value: 'raw', label: '原文素材' },
   { value: 'checks', label: 'AI 事实核查清单' },
+  { value: 'outline', label: 'AI 大纲' },
 ] as const
 const editorTabs = [
   { value: 'editor', label: '编辑' },
@@ -71,6 +73,7 @@ function Sources({ record }: { record: ProductionItem }) {
   const [tab, setTab] = useState<(typeof sourceTabs)[number]['value']>('raw')
   const group = useId()
   const url = externalUrl(record.url)
+  const markdown = tab === 'outline' ? record.ai_outline : record.fact_check
 
   return (
     <section className="wb-panel" aria-labelledby={`${group}-title`}>
@@ -89,9 +92,9 @@ function Sources({ record }: { record: ProductionItem }) {
             ? <p className="wb-original">{record.raw_content}</p>
             : <p className="wb-muted">暂无原文素材。</p>
         ) : (
-          record.fact_check?.trim()
-            ? <MarkdownPreview text={record.fact_check} />
-            : <p className="wb-muted">暂无 AI 事实核查清单。</p>
+          markdown?.trim()
+            ? <MarkdownPreview text={markdown} />
+            : <p className="wb-muted">{tab === 'outline' ? '暂无大纲' : '暂无 AI 事实核查清单。'}</p>
         )}
       </div>
     </section>
@@ -194,9 +197,15 @@ function Workbench({ api, id, writes, onWrite, refreshBoard, topicsPath }: Workb
               <button className="button button--secondary" disabled={!workbench.canPublish} onClick={() => void workbench.publish()}>
                 标记为已发布
               </button>
+              <button type="button" className="button button--secondary wb-benchmark" role="switch" aria-label="标杆样本"
+                aria-checked={record.is_benchmark} aria-disabled={!workbench.canToggleBenchmark}
+                onClick={() => void workbench.toggleBenchmark()}>
+                <Bookmark size={15} aria-hidden />标杆样本<span>{record.is_benchmark ? '已标记' : '未标记'}</span>
+              </button>
             </div>
             <div className="wb-record-status">
-              <span className="pill pill--neutral">{record.workflow_status}</span>
+              <span className="pill pill--neutral">{record.workflow_status || '未标注状态'}</span>
+              {!isWorkflowStatus(record.workflow_status) && <span>流程状态未识别，暂不能提交 AI 改稿或登记发布。</span>}
               {record.workflow_status === '已发布' && record.published_at &&
                 <time dateTime={record.published_at}>{record.published_at}</time>}
               {workbench.pending && !notice && <span>等待回写，可刷新记录查询进度。</span>}

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { RecordWrites } from '../../app/useRecordWrites'
+import { isWorkflowStatus } from '../../types/schema'
 import { WriteReadbackError } from '../../api'
 import type { ContentHubApi } from '../../api'
 import type { ProductionItem } from '../../types/schema'
@@ -22,7 +23,7 @@ interface PendingJob {
   receipt: 'existing' | 'notSent' | 'unconfirmed' | 'accepted'
 }
 
-type Operation = 'reading' | 'saving' | 'publishing' | 'rewriting'
+type Operation = 'reading' | 'saving' | 'publishing' | 'rewriting' | 'benchmarking'
 
 const rewriteStatus = '需AI润色'
 const rewriteAccepted = 'Webhook 已受理，等待改稿回写。'
@@ -110,10 +111,12 @@ export function useWorkbench(
   const dirty = Boolean(doc && doc.markdown !== savedMarkdown(doc.record))
   const pending = record?.workflow_status === rewriteStatus || record?.workflow_status === '已确认-待核对'
   const terminal = record?.workflow_status === '已发布' || record?.workflow_status === '已放弃'
+  const canChangeStatus = record !== undefined && isWorkflowStatus(record.workflow_status) && !terminal
   const blocked = operation !== null || needsRead || pending || writes.lockedIds.has(id)
   const canSave = Boolean(doc?.markdown.trim()) && !blocked && (dirty || !record?.final_md?.trim())
-  const canPublish = Boolean(record?.final_md?.trim()) && !dirty && !blocked && !terminal
-  const canRewrite = Boolean(record && savedMarkdown(record).trim() && note.trim()) && !dirty && !blocked && !terminal
+  const canPublish = Boolean(record?.final_md?.trim()) && !dirty && !blocked && canChangeStatus
+  const canRewrite = Boolean(record && savedMarkdown(record).trim() && note.trim()) && !dirty && !blocked && canChangeStatus
+  const canToggleBenchmark = Boolean(record) && !blocked
 
   function display(text: string, error = false) {
     if (live.current) setNotice({ text, error })
@@ -263,6 +266,26 @@ export function useWorkbench(
     })
   }
 
+  async function toggleBenchmark() {
+    if (!record || !canToggleBenchmark) return
+    const next = !record.is_benchmark
+    await run('benchmarking', async () => {
+      display('正在保存标杆样本状态…')
+      try {
+        const saved = await api.updateProductionItem(id, { is_benchmark: next })
+        acceptWrite(saved)
+        if (saved.is_benchmark === next) {
+          display(next ? '已标记为标杆样本。' : '已取消标杆样本。')
+        } else {
+          if (live.current) setNeedsRead(true)
+          display('回读未确认标杆样本状态。请刷新记录核对。', true)
+        }
+      } catch (error) {
+        writeUnverified(error)
+      }
+    })
+  }
+
   async function rewrite() {
     if (!canRewrite) return
     const revision = note.trim()
@@ -318,7 +341,7 @@ export function useWorkbench(
   }
 
   return {
-    doc, note, setNote, dirty, pending, operation, notice, copyNotice, canSave, canPublish, canRewrite,
-    refresh, edit, save, publish, rewrite, copy, adoptIncoming,
+    doc, note, setNote, dirty, pending, operation, notice, copyNotice, canSave, canPublish, canRewrite, canToggleBenchmark,
+    refresh, edit, save, publish, rewrite, toggleBenchmark, copy, adoptIncoming,
   }
 }

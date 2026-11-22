@@ -2,7 +2,7 @@ import { readBaseUrl, readTableId } from './config'
 import type { ContentHubEnv } from './config'
 import type { RecordStore, TableName, Tables } from './contracts'
 import { request } from './http'
-import { asObject, decodeRecord, readRecordId, requireRecordId } from './nocodbCodec'
+import { asObject, decodeRecord, NocodbStructureError, parseCheckbox, readRecordId, requireRecordId } from './nocodbCodec'
 
 const pageLimit = 100
 
@@ -38,10 +38,20 @@ export function createNocodbClient(env: ContentHubEnv, fetcher: typeof fetch): R
     })
   }
 
-  async function get<T extends TableName>(table: T, id: number): Promise<Tables[T]> {
+  async function get<T extends TableName>(
+    table: T,
+    id: number,
+    verifyCheckbox?: 'is_benchmark' | 'is_active',
+  ): Promise<Tables[T]> {
     requireRecordId(id)
     const response = await send(`${recordsUrl(table)}/${id}`, 'GET')
-    return decodeRecord(table, await response.json(), idField)
+    const value = asObject(await response.json())
+    if (verifyCheckbox && parseCheckbox(value[verifyCheckbox]) === null) {
+      throw new Error('NocoDB 回读缺少可识别的 ' + verifyCheckbox + ' 值。')
+    }
+    const record = decodeRecord(table, value, idField)
+    if (record.id !== id) throw new NocodbStructureError('NocoDB 单条记录的主键与请求不一致。')
+    return record
   }
 
   async function write<T extends TableName>(
@@ -64,9 +74,8 @@ export function createNocodbClient(env: ContentHubEnv, fetcher: typeof fetch): R
       }
 
       recordId = returnedId
-      const record = await get(table, returnedId)
-      if (record.id !== returnedId) throw new Error('NocoDB 回读记录的主键与回执不一致。')
-      return record
+      const checkbox = table === 'production_pool' ? 'is_benchmark' : table === 'rss_sources' ? 'is_active' : undefined
+      return await get(table, returnedId, checkbox && Object.hasOwn(fields, checkbox) ? checkbox : undefined)
     } catch (cause) {
       throw new WriteReadbackError(table, recordId, cause)
     }
@@ -88,8 +97,15 @@ export function createNocodbClient(env: ContentHubEnv, fetcher: typeof fetch): R
           throw new Error('NocoDB 分页响应必须包含 list 和 pageInfo.isLastPage。')
         }
 
-        for (const value of page.list) {
-          const row = decodeRecord(table, value, idField)
+        for (const [index, value] of page.list.entries()) {
+          let row: Tables[typeof table]
+          try {
+            row = decodeRecord(table, value, idField)
+          } catch (error) {
+            if (!(error instanceof NocodbStructureError)) throw error
+            console.warn('NocoDB ' + table + ' 第 ' + (offset + index + 1) + ' 条记录格式错误或无有效主键，已跳过。')
+            continue
+          }
           if (seen.has(row.id)) throw new Error('NocoDB 分页返回重复主键，请重新读取。')
           seen.add(row.id)
           rows.push(row)

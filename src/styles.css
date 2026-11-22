@@ -206,6 +206,11 @@ body { min-width: 320px; }
 .pill--violet, .pill--score { background: #efedfc; color: #4f3caa; }
 .pill--score { font-variant-numeric: tabular-nums; }
 .pill--red { background: #fdebed; color: #922d3a; }
+.topic-card .pill, .radar-tags .pill, .wb-record-status .pill, .source-group {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 .topic-origin { display: inline-flex; align-items: center; gap: 3px; margin-left: auto; color: var(--accent); font-size: 12px; font-weight: 650; }
 .topic-origin:hover { text-decoration: underline; text-underline-offset: 3px; }
 

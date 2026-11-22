@@ -31,6 +31,23 @@ afterEach(() => {
 })
 
 describe('选题看板', () => {
+  it('未知选题标签用灰色展示，可用原始值筛选且不执行未知状态的流转', async () => {
+    const api = createContentHubApi({})
+    const items = await api.listProductionItems()
+    vi.spyOn(api, 'listProductionItems').mockResolvedValue(items.map(item => item.id === 1
+      ? { ...item, track_tag: 'AI 新赛道', workflow_status: 'constructor', compliance_risk: '低风险' }
+      : item))
+    openApp(api)
+    const topic = within(await card(retail))
+    expect(topic.getByText('低风险').classList.contains('pill--neutral')).toBe(true)
+    expect(topic.getByText('constructor').classList.contains('pill--neutral')).toBe(true)
+    expect(topic.queryByRole('button', { name: '确认选题' })).toBeNull()
+    expect(topic.queryByRole('button', { name: '放弃' })).toBeNull()
+    choose('赛道', 'AI 新赛道')
+    choose('流程状态', 'constructor')
+    expect(screen.getAllByRole('article')).toHaveLength(1)
+  })
+
   it('默认进入选题看板并展示 Mock 卡片与安全原文外链', async () => {
     openApp()
     expect(screen.getByText('正在加载选题…')).toBeTruthy()
