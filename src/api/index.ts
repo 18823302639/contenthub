@@ -10,7 +10,7 @@ import { createWebhookClient } from './webhookClient'
 export type { ContentHubEnv } from './config'
 export type {
   ContentHubApi, NewAccountMetric, NewRssSource, ProductionFilters, ProductionUpdate,
-  RadarFilters, VideoFormat, WebhookAction, WebhookPayloads, WebhookReceipt,
+  RadarFilters, VideoFormat, VideoVoice, WebhookAction, WebhookPayloads, WebhookReceipt,
 } from './contracts'
 export { matchesProductionFilters } from './productionFilters'
 export { ApiHttpError } from './http'

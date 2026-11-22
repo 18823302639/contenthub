@@ -1,6 +1,13 @@
 import { ChevronDown, Download, LoaderCircle, Video } from 'lucide-react'
 import { useId, useState } from 'react'
-import type { ContentHubApi, VideoFormat } from '../../api'
+import type { ContentHubApi, VideoFormat, VideoVoice } from '../../api'
+
+const voiceOptions = [
+  { value: 'zh-CN-YunxiNeural', label: '云希 - 沉稳解说男声' },
+  { value: 'zh-CN-YunjianNeural', label: '云健 - 财经新闻男声' },
+  { value: 'zh-CN-XiaoxiaoNeural', label: '晓晓 - 自然亲和女声' },
+  { value: 'zh-CN-XiaoyiNeural', label: '晓伊 - 轻快活泼女声' },
+] as const satisfies readonly { value: VideoVoice; label: string }[]
 
 type Submission =
   | { phase: 'pending' }
@@ -9,7 +16,9 @@ type Submission =
 
 export function VideoControls({ api, productionId }: { api: ContentHubApi; productionId: number }) {
   const formatId = useId()
+  const voiceId = useId()
   const [format, setFormat] = useState<VideoFormat>('16x9')
+  const [voice, setVoice] = useState<VideoVoice>(voiceOptions[0].value)
   const [submission, setSubmission] = useState<Submission | null>(null)
   const pending = submission?.phase === 'pending'
   const jobId = submission?.phase === 'accepted' ? submission.jobId : null
@@ -19,7 +28,7 @@ export function VideoControls({ api, productionId }: { api: ContentHubApi; produ
     if (pending) return
     setSubmission({ phase: 'pending' })
     try {
-      const receipt = await api.triggerWebhook('generate-video', { production_id: productionId, format })
+      const receipt = await api.triggerWebhook('generate-video', { production_id: productionId, format, voice })
       if (receipt.jobId) setSubmission({ phase: 'accepted', jobId: receipt.jobId })
       else setSubmission({ phase: 'error', message: 'Webhook 已受理，但未返回有效任务 ID。请先核对 n8n 执行记录。' })
     } catch (error) {
@@ -31,14 +40,28 @@ export function VideoControls({ api, productionId }: { api: ContentHubApi; produ
   return (
     <div className="wb-video-controls">
       <div className="wb-video-actions">
-        <label className="wb-video-label" htmlFor={formatId}>视频画幅</label>
-        <div className="filter-control">
-          <select id={formatId} value={format} disabled={pending}
-            onChange={event => setFormat(event.target.value === '9x16' ? '9x16' : '16x9')}>
-            <option value="16x9">16x9（横屏 B站 / YouTube）</option>
-            <option value="9x16">9x16（竖屏 抖音 / 视频号）</option>
-          </select>
-          <ChevronDown size={14} aria-hidden />
+        <div className="wb-video-field">
+          <label className="wb-video-label" htmlFor={formatId}>视频画幅</label>
+          <div className="filter-control">
+            <select id={formatId} value={format} disabled={pending}
+              onChange={event => setFormat(event.target.value === '9x16' ? '9x16' : '16x9')}>
+              <option value="16x9">16x9（横屏 B站 / YouTube）</option>
+              <option value="9x16">9x16（竖屏 抖音 / 视频号）</option>
+            </select>
+            <ChevronDown size={14} aria-hidden />
+          </div>
+        </div>
+        <div className="wb-video-field">
+          <label className="wb-video-label" htmlFor={voiceId}>配音音色</label>
+          <div className="filter-control">
+            <select id={voiceId} value={voice} disabled={pending} onChange={event => {
+              const selected = voiceOptions.find(option => option.value === event.target.value)
+              if (selected) setVoice(selected.value)
+            }}>
+              {voiceOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </select>
+            <ChevronDown size={14} aria-hidden />
+          </div>
         </div>
         <button type="button" className="button button--secondary" disabled={pending} aria-busy={pending}
           onClick={() => void generate()}>

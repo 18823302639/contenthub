@@ -53,6 +53,16 @@
   align-items: center;
   gap: 6px 8px;
 }
+.wb-video-field {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  min-width: 0;
+  max-width: 100%;
+}
+.wb-video-field .filter-control { min-width: 0; max-width: 100%; }
+.wb-video-field select:disabled { cursor: not-allowed; opacity: .65; }
 .wb-video-label { color: var(--muted); font-size: 12px; font-weight: 650; }
 .wb-video-notice { margin-top: 8px; }
 .wb-video-notice code { overflow-wrap: anywhere; }

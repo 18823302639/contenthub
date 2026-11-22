@@ -35,7 +35,7 @@ afterEach(() => {
 })
 
 describe('改稿台', () => {
-  it('提交所选画幅，等待任务 ID 后显示编码正确的新标签页下载链接', async () => {
+  it('提交所选画幅和音色，等待任务 ID 后显示编码正确的新标签页下载链接', async () => {
     const record = await createContentHubApi({}).getProductionItem(3)
     let finishVideo!: (response: Response) => void
     const pending = new Promise<Response>(resolve => { finishVideo = resolve })
@@ -53,18 +53,28 @@ describe('改稿台', () => {
     mount(3, api)
     await editor()
     const format = screen.getByRole<HTMLSelectElement>('combobox', { name: '视频画幅' })
+    const voice = screen.getByRole<HTMLSelectElement>('combobox', { name: '配音音色' })
     expect(format.value).toBe('16x9')
+    expect(voice.value).toBe('zh-CN-YunxiNeural')
+    expect(Array.from(voice.options, option => option.value)).toEqual([
+      'zh-CN-YunxiNeural',
+      'zh-CN-YunjianNeural',
+      'zh-CN-XiaoxiaoNeural',
+      'zh-CN-XiaoyiNeural',
+    ])
     fireEvent.change(format, { target: { value: '9x16' } })
+    fireEvent.change(voice, { target: { value: 'zh-CN-XiaoyiNeural' } })
     press('生成视频')
 
     const waiting = screen.getByRole<HTMLButtonElement>('button', { name: '正在拆解分镜并推送渲染...' })
     expect(waiting.disabled).toBe(true)
     expect(waiting.getAttribute('aria-busy')).toBe('true')
     expect(format.disabled).toBe(true)
+    expect(voice.disabled).toBe(true)
     fireEvent.click(waiting)
     expect(fetcher.mock.calls.filter(([, init]) => init?.method === 'POST')).toEqual([
       ['/webhook/generate-video', expect.objectContaining({
-        body: '{"production_id":3,"format":"9x16"}',
+        body: '{"production_id":3,"format":"9x16","voice":"zh-CN-XiaoyiNeural"}',
         headers: { 'Content-Type': 'application/json' },
       })],
     ])
@@ -101,17 +111,19 @@ describe('改稿台', () => {
     expect(fetcher.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1)
   })
 
-  it('离线 Mock 给默认横屏任务返回模拟 ID，不产生网络请求或下载链接', async () => {
+  it('离线 Mock 提交默认横屏与云希音色，不产生网络请求或下载链接', async () => {
     const fetcher = vi.fn<typeof fetch>()
     const api = createContentHubApi({
       VITE_REMOTION_BASE_URL: 'https://render.example.invalid',
       VITE_REMOTION_TOKEN: 'test-only',
     }, fetcher)
+    const trigger = vi.spyOn(api, 'triggerWebhook')
     mount(3, api)
     await editor()
     press('生成视频')
 
     await screen.findByText('mock-video-3-16x9-1')
+    expect(trigger).toHaveBeenCalledExactlyOnceWith('generate-video', { production_id: 3, format: '16x9', voice: 'zh-CN-YunxiNeural' })
     expect(screen.queryByRole('link', { name: '下载成品 MP4' })).toBeNull()
     expect(fetcher).not.toHaveBeenCalled()
   })

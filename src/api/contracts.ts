@@ -20,11 +20,16 @@ export type ProductionUpdate = Partial<Pick<ProductionItem,
 > & { workflow_status: WorkflowStatus }>
 
 export type VideoFormat = '16x9' | '9x16'
+export type VideoVoice =
+  | 'zh-CN-YunxiNeural'
+  | 'zh-CN-YunjianNeural'
+  | 'zh-CN-XiaoxiaoNeural'
+  | 'zh-CN-XiaoyiNeural'
 
 export interface WebhookPayloads {
   'fetch-and-draft': { production_id: number }
   'rewrite-draft': { production_id: number; revision_note: string }
-  'generate-video': { production_id: number; format: VideoFormat }
+  'generate-video': { production_id: number; format: VideoFormat; voice: VideoVoice }
 }
 
 export type WebhookAction = keyof WebhookPayloads

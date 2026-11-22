@@ -82,7 +82,7 @@ npm run preview -- --host 127.0.0.1
 - 点击「AI 去味改稿」前，可留空、手填或选择快捷模板后编辑。留空会发送 `revision_note: ''`。界面先保存修改意见和「需AI润色」，确认回读后发出一次 `rewrite-draft`。真实模式受理后每 4 秒查询，最多等待 90 秒。手动刷新只读查询，同一任务沿用原轮询期限。
 - 读到新增或变化的非空 `draft_md` 时，编辑区立即显示它。若流程状态先更新，则继续等待正文回写。等待期间的人工稿件可在「本地备份」恢复，离开再返回改稿台时，本次应用会话会保留新初稿和备份。需要长期保留时，请保存定稿。仅更新定稿字段的工作流仍提供「回写稿」对照。
 - 读写失败或 Webhook 受理结果不明时，可刷新记录核对。刷新只读取记录。若记录仍显示「需AI润色」且没有可见结果，核对对应 n8n 执行记录。离开该选题或重载页面前，请保存需要保留的本地编辑。
-- 「生成视频」默认选 16x9，也可切换为 9x16。工作流按选题 ID 读取已存内容，需要带上刚编辑的正文时请先保存定稿。回执中的任务 ID 表示渲染任务已提交，约 40–60 秒后可尝试下载。Mock 仅演示提交回执。
+- 「生成视频」默认选 16x9 和云希，可切换为 9x16 或选择云健、晓晓、晓伊。工作流按选题 ID 读取已存内容，需要带上刚编辑的正文时请先保存定稿。回执中的任务 ID 表示渲染任务已提交，约 40–60 秒后可尝试下载。Mock 仅演示提交回执。
 
 ## RSS 信源管理
 
@@ -226,7 +226,7 @@ ContentHub/
 | --- | --- | --- | --- |
 | `fetch-and-draft` | `workflow_status: '已确认-待核对'` | `{ production_id }` | 写入原文、事实核查与初稿，状态改为「AI初稿完成」 |
 | `rewrite-draft` | 本次 `revision_note` 与 `workflow_status: '需AI润色'` | `{ production_id, revision_note }`，修改意见可为空字符串 | 优先展示回写的 `draft_md`，流程就绪后状态为「待人工终审」 |
-| `generate-video` | 按需保存最新定稿 | `{ production_id, format }`，`format` 为 `16x9` 或 `9x16` | 返回模拟 `jobId` |
+| `generate-video` | 按需保存最新定稿 | `{ production_id, format, voice }`，`format` 为 `16x9` 或 `9x16`，`voice` 为所选 Edge-TTS 音色 ID | 返回模拟 `jobId` |
 
 状态写入和 Webhook 受理是两次独立请求。先确认写入结果，再触发对应 Webhook。写入已返回成功但回执或回读异常时，API 抛出 `WriteReadbackError`，优先按可用主键查询记录。Webhook 超时、断网或响应有歧义时，先查记录和 n8n 执行历史，确认未启动后再触发。真实工作流若需要允许安全重试，应先约定执行标识与去重规则。 [n8n Webhook 响应模式](https://docs.n8n.io/integrations/builtin/core-nodes/n8n-nodes-base.webhook/#respond)
 
