@@ -49,7 +49,6 @@ export interface WebhookReceipt {
 
 export interface ContentHubApi {
   readonly mode: 'mock' | 'real'
-  readonly wf3Configured: boolean
   listProductionItems(filters?: ProductionFilters): Promise<ProductionItem[]>
   getProductionItem(id: number): Promise<ProductionItem>
   updateProductionItem(id: number, changes: ProductionUpdate): Promise<ProductionItem>

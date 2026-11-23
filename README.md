@@ -11,8 +11,8 @@ Dockerfile 使用 Node 构建 Vite 产物，最终镜像由 Nginx 提供 `dist` 
 启动 Docker Desktop，使用 Linux 容器。在下载 ZIP 的目录打开 PowerShell，执行：
 
 ```powershell
-Expand-Archive -LiteralPath .\ContentHub-responsive-ui.zip -DestinationPath .\contenthub-responsive-ui
-Set-Location .\contenthub-responsive-ui\ContentHub
+Expand-Archive -LiteralPath .\ContentHub-caddy-security.zip -DestinationPath .\contenthub-caddy-security
+Set-Location .\contenthub-caddy-security\ContentHub
 docker build -t contenthub:mock .
 docker run --rm -d --name contenthub -p 127.0.0.1:8088:80 contenthub:mock
 Start-Process 'http://127.0.0.1:8088/'
@@ -23,8 +23,8 @@ Start-Process 'http://127.0.0.1:8088/'
 Docker Engine 启动后，在下载 ZIP 的目录执行：
 
 ```bash
-unzip ContentHub-responsive-ui.zip -d contenthub-responsive-ui
-cd contenthub-responsive-ui/ContentHub
+unzip ContentHub-caddy-security.zip -d contenthub-caddy-security
+cd contenthub-caddy-security/ContentHub
 docker build -t contenthub:mock .
 docker run --rm -d --name contenthub -p 127.0.0.1:8088:80 contenthub:mock
 ```
@@ -39,20 +39,20 @@ docker stop contenthub
 
 ### 容器环境变量
 
-`VITE_*` 在构建时进入浏览器可见的产物。Dockerfile 默认构建 Mock。真实模式通过构建参数显式启用，运行时的 `docker run -e` 无法切换已编译的 SPA。`.dockerignore` 排除本地环境文件、凭据、依赖、Git 和构建产物，源码 ZIP 中保留的 `.env.example` 仅供本地开发参考。真实 NocoDB 和 n8n 联调另行配置受保护的同源代理及访问控制。不要把真实令牌放入构建参数、镜像或浏览器包，也不要公开暴露未保护的 Webhook。 [Vite 构建期变量说明](https://vite.dev/guide/env-and-mode)
+Vite 构建时按完整变量名选取公开的 `VITE_*` 配置并写入浏览器产物。没有配置时默认构建 Mock。真实模式可用根目录 `.env` 或构建参数启用，运行时的 `docker run -e` 无法切换已编译的 SPA。`.dockerignore` 只放行根目录 `.env`，其他本地环境文件、依赖、Git 和构建产物仍排除。Git 忽略实际 `.env`。Docker BuildKit 在构建步骤中只读挂载上下文供 Vite 加载配置，运行镜像只复制 `dist`。真实 NocoDB 和 n8n 联调另行配置受保护的同源代理及访问控制。不要把真实令牌放入构建参数、镜像或浏览器包，也不要公开暴露未保护的 Webhook。 [Vite 构建期变量说明](https://vite.dev/guide/env-and-mode)
 
 #### Docker Compose 构建
 
-运行 `docker compose up --build` 以启动默认 Mock。Compose 从部署环境读取 `build.args`，包括 `VITE_WF2_GENERATE_WEBHOOK_URL` 和 `VITE_WF3_RENDER_WEBHOOK_URL`。已有真实模式构建可传 `VITE_USE_MOCK=false` 并配置 NocoDB 表 ID、基础路径和 Webhook。WF2 留空时使用默认 `generate-draft` 端点，WF3 留空时在提交处提示未配置。
+运行 `docker compose up --build` 以启动默认 Mock。Compose 从部署环境读取 `build.args`，包括 `VITE_WF2_GENERATE_WEBHOOK_URL` 和 `VITE_WF3_RENDER_WEBHOOK_URL`。已有真实模式构建可传 `VITE_USE_MOCK=false` 并配置 NocoDB 表 ID、基础路径和 Webhook。Webhook 和 NocoDB 地址留空时分别使用 `/api/n8n` 和 `/api/nocodb`。地址覆盖仅允许以 `/` 开头的同源路径。Docker 构建参数优先于根目录 `.env`。
 
-`VITE_WEBHOOK_SECRET` 会写入浏览器可读的 JavaScript，Docker 构建参数也可能留在构建记录中。公开部署可通过受保护的同源代理转发 `rss-sync-now`，令前端使用公开标记 `proxy-managed`。代理校验登录和权限后覆盖 `X-Hub-Token`，真实密钥保留在代理端。 [Vite 环境变量](https://vite.dev/guide/env-and-mode#env-variables) [Docker 构建变量](https://docs.docker.com/build/building/variables/)
+根目录 `.env` 只放前端可公开的构建配置。Webhook 和 NocoDB 密钥应保留在部署服务器的 Caddy 私有配置或密钥机制中。若密钥曾进入可访问的浏览器产物，部署新版时请轮换旧密钥，并下线旧产物。 [Vite 环境变量](https://vite.dev/guide/env-and-mode#env-variables) [Docker 构建上下文](https://docs.docker.com/build/concepts/context/#dockerignore-files)
 
 ## 初始化与启动
 
 要求 Node.js 22.13+（22 系列）或 24+，以及 npm。源码包包含锁文件。
 
 ```bash
-unzip ContentHub-responsive-ui.zip
+unzip ContentHub-caddy-security.zip
 cd ContentHub
 cp .env.example .env.local
 npm ci --no-audit --no-fund
@@ -228,21 +228,27 @@ ContentHub/
 | `account_metrics` | `VITE_NOCODB_ACCOUNT_METRICS_TABLE_ID` |
 | `post_metrics` | `VITE_NOCODB_POST_METRICS_TABLE_ID`，仅调用 `listPostMetrics()` 时配置 |
 
-- NocoDB 以 `VITE_NOCODB_API_URL` 为 v2 基础地址。客户端自动发送 `xc-token`，使用 `GET /tables/{tableId}/records` 的 `offset`、`limit` 和 `pageInfo.isLastPage` 遍历记录。分页按主键排序，偏移量依返回的实际条数递增。 [NocoDB v2 数据 API](https://nocodb.com/apis/v2/data)
+- NocoDB 默认通过同源 `/api/nocodb` 访问，可用 `VITE_NOCODB_API_URL` 覆盖为其他同源路径。客户端通过代理使用 `GET /tables/{tableId}/records` 的 `offset`、`limit` 和 `pageInfo.isLastPage` 遍历记录。分页按主键排序，偏移量依返回的实际条数递增。 [NocoDB v2 数据 API](https://nocodb.com/apis/v2/data)
 - 单条读取使用 `GET /tables/{tableId}/records/{id}`。`POST` 新增和 `PATCH` 更新都发送一项记录数组到记录集合。PATCH 包含主键，写入成功后按回执主键回读。NocoDB 主键显示名默认 `id`，可将 `VITE_NOCODB_ID_FIELD` 设为实际显示名，例如 `Id`。前端模型统一使用数值型 `id`。 [NocoDB v2 数据 API](https://nocodb.com/apis/v2/data)
 - 读取时，未知选项保留原文本并在控制台提示。标题接受数组、JSON 数组或单条文本。缺失文本和日期为空字符串，`ai_outline` 缺失时为 `null`，无效数值按缺失处理。布尔值兼容 `true`、`false`、`1`、`0` 及其字符串。列表内无有效主键的记录会跳过，分页仍按原始条数前进。
 - `post_metrics` 只读接口按同名字段兼容 `production_id`、`platform`、展现、阅读、CTR、完读率、收益和记录日期。项目没有这张表的专属列定义，同名字段以外的列需要确认实际映射后才可使用。运营页继续查询 `account_metrics`。
-- n8n 以 `VITE_N8N_WEBHOOK_BASE_URL` 为基础地址，JSON body 通过 POST 发往 `${VITE_N8N_WEBHOOK_BASE_URL}/${action}`。初稿和改稿的 2xx 回执表示请求受理，完成结果通过 NocoDB 回读。视频工作流在 2xx JSON 回执中返回 `{ jobId, downloadUrl }`。`jobId` 为非空字符串，`downloadUrl` 由后端签发，单视频有效期 24 小时。缺少合法 HTTP(S) 下载链接时，改稿台仍显示有效任务 ID。 [n8n Webhook](https://docs.n8n.io/integrations/builtin/core-nodes/n8n-nodes-base.webhook/)
+- n8n 的采集和旧流程默认向同源 `/api/n8n/${action}` POST JSON，可通过 `VITE_N8N_WEBHOOK_BASE_URL` 覆盖基础路径。初稿和改稿的 2xx 回执表示请求受理，完成结果通过 NocoDB 回读。视频工作流在 2xx JSON 回执中返回 `{ jobId, downloadUrl }`。`jobId` 为非空字符串，`downloadUrl` 由后端签发，单视频有效期 24 小时。缺少合法 HTTP(S) 下载链接时，改稿台仍显示有效任务 ID。 [n8n Webhook](https://docs.n8n.io/integrations/builtin/core-nodes/n8n-nodes-base.webhook/)
 
 真实部署待实测项目包括 PostgreSQL 外部表在 NocoDB 中暴露的字段名和类型、主键和创建时间默认值、标题 JSON 与日期的实际序列化、单条写入回执及分页上限，以及已激活的 n8n 工作流对 payload 的解析、鉴权和写回状态。接口测试使用合成响应，未连接真实 NocoDB、n8n 和渲染机。
 
-### WF2 和 WF3 Webhook
+### Caddy 同源代理
 
-WF2 默认使用 `https://n8n.xuanhub.xyz/webhook/generate-draft`，可通过 `VITE_WF2_GENERATE_WEBHOOK_URL` 覆盖。WF3 通过 `VITE_WF3_RENDER_WEBHOOK_URL` 配置。两者都发送 `POST` JSON `{ "record_id": 记录主键 }`，仅在各自需要认证的端点使用 `VITE_WEBHOOK_SECRET` 对应的 `X-Hub-Token`。真实服务联调需确认端点可访问，跨源服务允许应用来源和此请求头。
+| 动作 | 默认路径 | 覆盖变量 |
+| --- | --- | --- |
+| 手动采集 WF1 | `/api/n8n/rss-sync-now` | `VITE_N8N_WEBHOOK_BASE_URL`（基础路径） |
+| 初稿生成 WF2 | `/api/n8n/generate-draft` | `VITE_WF2_GENERATE_WEBHOOK_URL` |
+| 提交渲染 WF3 | `/api/n8n/render-video` | `VITE_WF3_RENDER_WEBHOOK_URL` |
+
+WF2 和 WF3 发送 `POST` JSON `{ "record_id": 记录主键 }`。现有 Caddy 站点认证须覆盖网页和 `/api/*`。Caddy 将 `/api/n8n/<action>` 转发到 n8n 的 `/webhook/<action>`，上游要求 Webhook 密钥时，由 Caddy 设置 `X-Hub-Token` 并覆盖客户端同名头。若继续使用旧改稿和视频入口，代理还需映射相应的 `fetch-and-draft`、`rewrite-draft` 和 `generate-video`。仓库中的 Nginx 负责静态文件，Caddy 处理 API 后将其余请求转发到静态站点。默认 WF3 路由返回 HTTP 404 时，界面提示渲染服务尚未接入。
 
 ### RSS 采集接口
 
-采集配置使用 NocoDB 的 `sync_settings` 表中的单条记录。需填写实际 Table ID 和现有记录主键。前端用既有 `xc-token` 读取与更新该行，切换频率只写数值字段 `sync_interval_hours`，允许值为 0、1、3、6、12、24。后端调度读取该字段，手动采集通过既有 n8n 基础路径向 `POST /rss-sync-now` 发送空 JSON 对象，真实模式只为该操作携带 `X-Hub-Token`，取值来自 `VITE_WEBHOOK_SECRET`。缺少配置或收到 HTTP 401/403 时，页面会提示采集鉴权失败。跨域部署时，代理或 n8n 需允许 ContentHub 的来源及请求头 `X-Hub-Token`。工作流采集完成后在同一行写入带时区的 `last_synced_at`。Mock 只模拟配置和完成时间，真实接口需联调验证。
+采集配置使用 NocoDB 的 `sync_settings` 表中的单条记录。需填写实际 Table ID 和现有记录主键。前端通过同源 NocoDB 代理读取与更新该行，切换频率只写数值字段 `sync_interval_hours`，允许值为 0、1、3、6、12、24。后端调度读取该字段，手动采集向同源代理发送空 JSON 对象。代理返回 HTTP 401/403 时，页面会提示采集鉴权失败。工作流采集完成后在同一行写入带时区的 `last_synced_at`。Mock 只模拟配置和完成时间，真实接口需联调验证。
 
 ### 受理、完成与重试
 
@@ -258,9 +264,9 @@ WF2 默认使用 `https://n8n.xuanhub.xyz/webhook/generate-draft`，可通过 `V
 
 ### 联调权限边界
 
-`VITE_*` 会进入浏览器产物。`VITE_NOCODB_TOKEN` 在直连时也会出现在浏览器请求中。禁止将真实长期 `xc-token` 写入任何公开或共享构建。只在隔离、受控的临时联调中使用短期、最小权限凭证。
+NocoDB 和 n8n 的认证凭据保存在部署端。浏览器只调用同源代理路径；需要覆盖时仍应指定以 `/` 开头的路径。HTTP 401/403 仍会显示鉴权失败信息。
 
-部署环境可使用现有同源反向代理，例如将基础地址设为 `/internal/nocodb/api/v2` 和 `/internal/n8n/webhook`。若代理负责注入凭证，可让浏览器的 `VITE_NOCODB_TOKEN` 使用公开标记 `proxy-managed`。代理应在完成用户鉴权和授权后覆盖客户端发送的 `xc-token`，仅放行所需表、方法及指定的 Webhook 路径。可按现有设施选用身份网关、VPN 或内网访问控制。跨源 CORS 用于控制浏览器可读取响应的来源。身份校验、表和工作流的访问授权仍需独立配置。此方案由部署环境提供，本阶段只交付前端适配。
+Caddy 在站点认证通过后把 `/api/nocodb/` 映射到 NocoDB 的 `/api/v2/`，保留后续路径和查询参数，并在上游请求中设置 `xc-token`，覆盖客户端同名头。如果站点用 Caddy Basic Auth 登录，通过认证后可用 `header_up -Authorization` 避免将站点登录凭据转发给业务上游。代理仅放行所需表、方法和 Webhook 路径，服务器密钥文件保留在 Docker 构建上下文之外。 [Caddy 反向代理文档](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy)
 
 视频下载使用后端返回的签名地址，前端直接在新标签页打开并保留查询串原文。渲染服务地址和签名凭据由后端管理。HTTPS 部署请签发 HTTPS 下载链接。浏览器通过 `GET` 和 `Range: bytes=0-0` 检查 R2，跨域时需要存储桶的 CORS 策略允许 ContentHub 的来源和 `GET`。 [Cloudflare R2 CORS 配置](https://developers.cloudflare.com/r2/buckets/cors/#use-cors-with-a-presigned-url) [W3C 混合内容规范](https://www.w3.org/TR/mixed-content/#modifications-to-html)
 

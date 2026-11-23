@@ -23,7 +23,6 @@ async function mountVideoTasks(receipt: () => Promise<Response>, probe: typeof f
   const api = createContentHubApi({
     VITE_USE_MOCK: 'false',
     VITE_NOCODB_API_URL: '/nocodb',
-    VITE_NOCODB_TOKEN: 'test-only',
     VITE_NOCODB_PRODUCTION_POOL_TABLE_ID: 'mtestworkbench',
     VITE_N8N_WEBHOOK_BASE_URL: '/webhook',
   }, fetcher)
@@ -194,7 +193,6 @@ describe('改稿台', () => {
     const api = createContentHubApi({
       VITE_USE_MOCK: 'false',
       VITE_NOCODB_API_URL: '/nocodb',
-      VITE_NOCODB_TOKEN: 'test-only',
       VITE_NOCODB_PRODUCTION_POOL_TABLE_ID: 'mtestworkbench',
       VITE_N8N_WEBHOOK_BASE_URL: '/webhook',
     }, fetcher)

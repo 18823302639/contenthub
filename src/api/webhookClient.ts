@@ -1,13 +1,12 @@
 import { externalUrl } from '../utils/externalUrl'
-import { defaultWf2Url, readBaseUrl, wf3NotConfigured } from './config'
+import { defaultN8nWebhookBase, defaultWf2Url, defaultWf3Url, readProxyPath, wf3NotConfigured } from './config'
 import type { ContentHubEnv } from './config'
 import type { WebhookReceipt, WebhookRequest } from './contracts'
-import { ApiHttpError, request } from './http'
+import { ApiHttpError, isAuthFailure, request } from './http'
 
 export class WebhookAuthError extends Error {
-  constructor(action: string, status?: number) {
-    const detail = status === undefined ? '未配置 VITE_WEBHOOK_SECRET。' : `HTTP ${status}。`
-    super(action + '鉴权失败，请检查 Webhook 密钥配置。' + detail)
+  constructor(action: string, status: number) {
+    super(`${action}鉴权失败，请检查服务器 Webhook 代理鉴权配置。HTTP ${status}。`)
     this.name = 'WebhookAuthError'
   }
 }
@@ -21,18 +20,16 @@ function readSignedDownloadUrl(value: unknown): string | null {
 }
 
 export function createWebhookClient(env: ContentHubEnv, fetcher: typeof fetch) {
-  async function post(url: string, payload: object, protectedAction?: string) {
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-    if (protectedAction) {
-      const secret = env.VITE_WEBHOOK_SECRET?.trim()
-      if (!secret) throw new WebhookAuthError(protectedAction)
-      headers['X-Hub-Token'] = secret
-    }
+  async function post(url: string, payload: object, actionLabel?: string) {
     try {
-      return await request(fetcher, 'n8n Webhook', url, { method: 'POST', headers, body: JSON.stringify(payload) })
+      return await request(fetcher, 'n8n Webhook', url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
     } catch (error) {
-      if (protectedAction && error instanceof ApiHttpError && (error.status === 401 || error.status === 403)) {
-        throw new WebhookAuthError(protectedAction, error.status)
+      if (actionLabel && isAuthFailure(error)) {
+        throw new WebhookAuthError(actionLabel, error.status)
       }
       throw error
     }
@@ -40,7 +37,7 @@ export function createWebhookClient(env: ContentHubEnv, fetcher: typeof fetch) {
 
   return {
     async triggerWebhook(...[action, payload]: WebhookRequest): Promise<WebhookReceipt> {
-      const base = readBaseUrl(env.VITE_N8N_WEBHOOK_BASE_URL, 'VITE_N8N_WEBHOOK_BASE_URL')
+      const base = readProxyPath(env.VITE_N8N_WEBHOOK_BASE_URL?.trim() || defaultN8nWebhookBase, 'VITE_N8N_WEBHOOK_BASE_URL')
       const response = await post(`${base}/${action}`, payload, action === 'rss-sync-now' ? '采集' : undefined)
       const receipt: WebhookReceipt = { accepted: true, status: response.status }
       if (action === 'generate-video') {
@@ -52,17 +49,22 @@ export function createWebhookClient(env: ContentHubEnv, fetcher: typeof fetch) {
     },
 
     async triggerGenerateDraft(recordId: number): Promise<WebhookReceipt> {
-      const url = readBaseUrl(env.VITE_WF2_GENERATE_WEBHOOK_URL?.trim() || defaultWf2Url, 'VITE_WF2_GENERATE_WEBHOOK_URL')
+      const url = readProxyPath(env.VITE_WF2_GENERATE_WEBHOOK_URL?.trim() || defaultWf2Url, 'VITE_WF2_GENERATE_WEBHOOK_URL')
       const response = await post(url, { record_id: recordId }, '初稿生成')
       return { accepted: true, status: response.status }
     },
 
     async triggerRender(recordId: number): Promise<WebhookReceipt> {
-      const configured = env.VITE_WF3_RENDER_WEBHOOK_URL?.trim()
-      if (!configured) throw new Error(wf3NotConfigured)
-      const url = readBaseUrl(configured, 'VITE_WF3_RENDER_WEBHOOK_URL')
-      const response = await post(url, { record_id: recordId }, '渲染提交')
-      return { accepted: true, status: response.status }
+      const url = readProxyPath(env.VITE_WF3_RENDER_WEBHOOK_URL?.trim() || defaultWf3Url, 'VITE_WF3_RENDER_WEBHOOK_URL')
+      try {
+        const response = await post(url, { record_id: recordId }, '渲染提交')
+        return { accepted: true, status: response.status }
+      } catch (error) {
+        if (url === defaultWf3Url && error instanceof ApiHttpError && error.status === 404) {
+          throw new Error(wf3NotConfigured, { cause: error })
+        }
+        throw error
+      }
     },
   }
 }

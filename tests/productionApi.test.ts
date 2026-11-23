@@ -3,41 +3,46 @@ import { createContentHubApi } from '../src/api'
 
 const env = {
   VITE_USE_MOCK: 'false',
-  VITE_WEBHOOK_SECRET: 'test-only-workflow',
   VITE_NOCODB_API_URL: '/nocodb',
-  VITE_NOCODB_TOKEN: 'test-only-noco',
   VITE_NOCODB_PRODUCTION_POOL_TABLE_ID: 'mtestproduction',
 }
 
 describe('WF2 和 WF3', () => {
-  it('使用独立端点、认证及 record_id 并保持 WF2 默认路径', async () => {
+  it('WF1、WF2、WF3 默认使用同源代理，也支持单独配置且不发送密钥', async () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation(async () => new Response(null, { status: 200 }))
-    await createContentHubApi(env, fetcher).triggerGenerateDraft(9)
+    const defaults = createContentHubApi(env, fetcher)
+    await defaults.triggerWebhook('rss-sync-now', {})
+    await defaults.triggerGenerateDraft(9)
+    await defaults.triggerRender(9)
     const configured = createContentHubApi({
-      ...env, VITE_WF2_GENERATE_WEBHOOK_URL: '/internal/generate',
+      ...env, VITE_N8N_WEBHOOK_BASE_URL: '/internal/n8n/', VITE_WF2_GENERATE_WEBHOOK_URL: '/internal/generate',
       VITE_WF3_RENDER_WEBHOOK_URL: '/internal/render',
     }, fetcher)
+    await configured.triggerWebhook('rss-sync-now', {})
     await configured.triggerGenerateDraft(9)
     await configured.triggerRender(9)
     expect(fetcher.mock.calls.map(([url]) => url)).toEqual([
-      'https://n8n.xuanhub.xyz/webhook/generate-draft', '/internal/generate', '/internal/render',
+      '/api/n8n/rss-sync-now', '/api/n8n/generate-draft', '/api/n8n/render-video',
+      '/internal/n8n/rss-sync-now', '/internal/generate', '/internal/render',
     ])
-    for (const [, init] of fetcher.mock.calls) {
-      expect(init).toMatchObject({ method: 'POST', body: '{"record_id":9}', redirect: 'error' })
-      expect(new Headers(init?.headers).get('X-Hub-Token')).toBe('test-only-workflow')
+    for (const [url, init] of fetcher.mock.calls) {
+      const body = String(url).endsWith('/rss-sync-now') ? '{}' : '{"record_id":9}'
+      expect(init).toMatchObject({ method: 'POST', body, redirect: 'error' })
+      expect(new Headers(init?.headers).has('X-Hub-Token')).toBe(false)
       expect(new Headers(init?.headers).get('Content-Type')).toBe('application/json')
     }
   })
 
-  it('在 WF3 未配置或 WF2 缺密钥时不发送请求，认证拒绝给出提示', async () => {
-    const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(new Response(null, { status: 403 }))
+  it('代理拒绝时保留鉴权失败提示，缺失默认 WF3 路由时提示尚未接入', async () => {
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(null, { status: 403 }))
+      .mockResolvedValueOnce(new Response(null, { status: 401 }))
+      .mockResolvedValueOnce(new Response(null, { status: 404 }))
     const api = createContentHubApi(env, fetcher)
+    await expect(api.triggerGenerateDraft(9)).rejects.toThrow(/初稿生成鉴权失败.*403/)
+    await expect(api.triggerRender(9)).rejects.toThrow(/渲染提交鉴权失败.*401/)
     await expect(api.triggerRender(9)).rejects.toThrow('WF3 渲染服务尚未配置，请先完成 Day 3 广州渲染节点接入')
-    await expect(createContentHubApi({ ...env, VITE_WEBHOOK_SECRET: '' }, fetcher).triggerGenerateDraft(9))
-      .rejects.toThrow('VITE_WEBHOOK_SECRET')
-    expect(fetcher).not.toHaveBeenCalled()
-    await expect(api.triggerGenerateDraft(9)).rejects.toThrow(/鉴权失败.*403/)
-    expect(fetcher).toHaveBeenCalledTimes(1)
+    expect(fetcher).toHaveBeenCalledTimes(3)
   })
 
   it('解码完整字段，并向 NocoDB 以 JSON 对象更新渲染数据', async () => {

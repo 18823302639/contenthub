@@ -1,14 +1,15 @@
-import { readBaseUrl, readTableId } from './config'
+import { defaultNocodbBase, readProxyPath, readTableId } from './config'
 import type { ContentHubEnv } from './config'
 import type { RecordStore, TableName, Tables } from './contracts'
-import { request } from './http'
+import { ApiHttpError, isAuthFailure, request } from './http'
 import { asObject, decodeRecord, NocodbStructureError, parseCheckbox, readRecordId, requireRecordId } from './nocodbCodec'
 
 const pageLimit = 100
 
 export class WriteReadbackError extends Error {
   constructor(readonly table: TableName, readonly recordId: number | null, cause: unknown) {
-    super('NocoDB 已返回写入成功，但无法确认记录的最新状态。请先查询记录，避免重复写入。', { cause })
+    const hint = isAuthFailure(cause) ? ' ' + cause.message : ''
+    super('NocoDB 已返回写入成功，但无法确认记录的最新状态。请先查询记录，避免重复写入。' + hint, { cause })
     this.name = 'WriteReadbackError'
   }
 }
@@ -18,24 +19,26 @@ export function createNocodbClient(env: ContentHubEnv, fetcher: typeof fetch): R
 
   function recordsUrl(table: TableName): string {
     const id = readTableId(env, table)
-    const base = readBaseUrl(env.VITE_NOCODB_API_URL, 'VITE_NOCODB_API_URL')
+    const base = readProxyPath(env.VITE_NOCODB_API_URL?.trim() || defaultNocodbBase, 'VITE_NOCODB_API_URL')
     return `${base}/tables/${encodeURIComponent(id)}/records`
   }
 
   async function send(url: string, method: 'GET' | 'POST' | 'PATCH', fields?: object) {
-    const token = env.VITE_NOCODB_TOKEN?.trim()
-    if (!token || token === 'your_token_here') {
-      throw new Error('请配置 VITE_NOCODB_TOKEN，或为受保护的同源代理配置公开标记。')
-    }
-
-    const headers = new Headers({ Accept: 'application/json', 'xc-token': token })
+    const headers = new Headers({ Accept: 'application/json' })
     if (fields) headers.set('Content-Type', 'application/json')
 
-    return request(fetcher, 'NocoDB', url, {
-      method,
-      headers,
-      body: fields ? JSON.stringify([fields]) : undefined,
-    })
+    try {
+      return await request(fetcher, 'NocoDB', url, {
+        method,
+        headers,
+        body: fields ? JSON.stringify([fields]) : undefined,
+      })
+    } catch (error) {
+      if (isAuthFailure(error)) {
+        throw new ApiHttpError(error.service, error.status, '请检查服务器 NocoDB 代理鉴权配置。')
+      }
+      throw error
+    }
   }
 
   async function get<T extends TableName>(

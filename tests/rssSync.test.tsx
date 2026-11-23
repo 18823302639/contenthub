@@ -95,34 +95,28 @@ it('信源正在写入时先等待，完成后执行采集受理要求的列表�
   await waitFor(() => expect(list).toHaveBeenCalledOnce())
 })
 
-it.each([
-  { label: '未配置密钥', secret: undefined, status: undefined, hint: 'VITE_WEBHOOK_SECRET' },
-  { label: '空白密钥', secret: '  ', status: undefined, hint: 'VITE_WEBHOOK_SECRET' },
-  { label: 'HTTP 401', secret: 'test-only-rss-header', status: 401, hint: '401' },
-  { label: 'HTTP 403', secret: 'test-only-rss-header', status: 403, hint: '403' },
-])('立即采集遇到 $label 时显示明确的鉴权失败', async ({ secret, status, hint }) => {
+it.each([401, 403])('立即采集的代理返回 HTTP %i 时显示明确的鉴权失败', async status => {
   const fetcher = vi.fn<typeof fetch>().mockImplementation(async (_url, init) => init?.method === 'POST'
-    ? new Response(null, { status: status ?? 202 })
+    ? new Response(null, { status })
     : Response.json({ list: [], pageInfo: { isLastPage: true } }))
   const api = createContentHubApi({
     VITE_USE_MOCK: 'false',
     VITE_NOCODB_API_URL: '/nocodb',
-    VITE_NOCODB_TOKEN: 'test-only',
     VITE_NOCODB_PRODUCTION_POOL_TABLE_ID: 'mtestcollection',
-    VITE_N8N_WEBHOOK_BASE_URL: '/webhook',
-    VITE_WEBHOOK_SECRET: secret,
   }, fetcher)
   setup('/topics', api)
   await loadSettings()
 
   fireEvent.click(screen.getByRole('button', { name: '立即采集' }))
   const alert = await screen.findByRole('alert')
-  expect(alert.textContent).toContain('采集鉴权失败，请检查 Webhook 密钥配置')
-  expect(alert.textContent).toContain(hint)
+  expect(alert.textContent).toContain('采集鉴权失败，请检查服务器 Webhook 代理鉴权配置')
+  expect(alert.textContent).toContain(String(status))
   expect(screen.getByRole<HTMLButtonElement>('button', { name: '立即采集' }).disabled).toBe(false)
   expect(screen.queryByText('已触发采集，请稍后刷新查看新选题')).toBeNull()
   const submitted = fetcher.mock.calls.filter(([, init]) => init?.method === 'POST')
-  expect(submitted).toHaveLength(status === undefined ? 0 : 1)
+  expect(submitted).toHaveLength(1)
+  expect(submitted[0][0]).toBe('/api/n8n/rss-sync-now')
+  expect(new Headers(submitted[0][1]?.headers).has('X-Hub-Token')).toBe(false)
   expect(fetcher.mock.calls.filter(([, init]) => init?.method === 'GET')).toHaveLength(1)
 })
 

@@ -139,10 +139,10 @@ it('WF2 无回写时最多等 180 秒，停止继续读单条', async () => {
   expect(get).toHaveBeenCalledTimes(35)
 })
 
-it('只有主赛道显示 WF3，未配置且满足数据要求时给出明确提示', async () => {
+it('只有主赛道显示 WF3，默认配置可提交并反馈代理尚未接入', async () => {
   const api = mount()
   vi.spyOn(api, 'getProductionItem').mockImplementation(async id => id === 1 ? { ...main, compliance_risk: '低风险' } : sub)
-  const trigger = vi.spyOn(api, 'triggerRender')
+  const trigger = vi.spyOn(api, 'triggerRender').mockRejectedValueOnce(new Error('WF3 渲染服务尚未配置，请先完成 Day 3 广州渲染节点接入'))
   await screen.findByRole('article', { name: main.zh_title })
   fireEvent.click(card(main.zh_title).getByRole('button', { name: '打开工作台' }))
   let modal = within(await screen.findByRole('dialog'))
@@ -150,7 +150,7 @@ it('只有主赛道显示 WF3，未配置且满足数据要求时给出明确提
   expect(renderButton.disabled).toBe(false)
   fireEvent.click(renderButton)
   await modal.findByText('WF3 渲染服务尚未配置，请先完成 Day 3 广州渲染节点接入')
-  expect(trigger).not.toHaveBeenCalled()
+  expect(trigger).toHaveBeenCalledExactlyOnceWith(1)
   fireEvent.click(modal.getByRole('button', { name: '关闭工作台' }))
 
   fireEvent.click(card(sub.zh_title).getByRole('button', { name: '打开工作台' }))

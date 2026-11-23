@@ -3,9 +3,8 @@ import { createContentHubApi } from '../src/api'
 
 const env = {
   VITE_USE_MOCK: 'false',
-  VITE_NOCODB_API_URL: 'https://nocodb.example.invalid/api/v2/',
-  VITE_NOCODB_TOKEN: 'test-only',
-  VITE_N8N_WEBHOOK_BASE_URL: 'https://n8n.example.invalid/webhook/',
+  VITE_NOCODB_API_URL: '/backend/nocodb/',
+  VITE_N8N_WEBHOOK_BASE_URL: '/backend/n8n/',
   VITE_NOCODB_RSS_SOURCES_TABLE_ID: 'mtestsource12345',
   VITE_NOCODB_PRODUCTION_POOL_TABLE_ID: 'mtestproduct1234',
   VITE_NOCODB_RADAR_POOL_TABLE_ID: 'mtestradar123456',
@@ -249,7 +248,7 @@ describe('NocoDB v2 与真实模式', () => {
         { id: 12, is_active: false, pool_type: '另一个池' },
         { id: 13, is_active: true, rss_url: '', created_at: '' },
       ])
-      expect(new URL(String(fetcher.mock.calls[1][0])).searchParams.get('offset')).toBe('3')
+      expect(new URL(String(fetcher.mock.calls[1][0]), 'https://contenthub.example.invalid').searchParams.get('offset')).toBe('3')
       expect(warn.mock.calls.filter(([message]) => String(message).includes('已跳过'))).toHaveLength(2)
       await expect(api.listRssSources()).rejects.toThrow('分页')
       await expect(api.getProductionItem(7)).rejects.toThrow('主键')
@@ -285,7 +284,7 @@ describe('NocoDB v2 与真实模式', () => {
         ctr: null, completion_rate: null, revenue: 12.5, recorded_at: '' }
       await expect(api.listAccountMetrics()).resolves.toMatchObject([{ ...expected, production_id: 7 }])
       await expect(api.listPostMetrics()).resolves.toMatchObject([{ ...expected, production_id: null }])
-      expect(new URL(String(fetcher.mock.calls[1][0])).pathname).toBe('/api/v2/tables/mtestpost123456/records')
+      expect(new URL(String(fetcher.mock.calls[1][0]), 'https://contenthub.example.invalid').pathname).toBe('/backend/nocodb/tables/mtestpost123456/records')
     } finally { warn.mockRestore() }
   })
 
@@ -295,14 +294,55 @@ describe('NocoDB v2 与真实模式', () => {
     expect(() => createContentHubApi({ VITE_USE_MOCK: 'flase' })).toThrow('VITE_USE_MOCK')
   })
 
-  it('缺少真实 Table ID 或凭证、误填 SQL 表名时在发请求前报配置错误', async () => {
+  it('缺少真实 Table ID 或误填 SQL 表名时在发请求前报配置错误', async () => {
     const fetcher = vi.fn<typeof fetch>()
     const api = createContentHubApi({ ...env, VITE_NOCODB_RSS_SOURCES_TABLE_ID: '' }, fetcher)
     await expect(api.listRssSources()).rejects.toThrow('VITE_NOCODB_RSS_SOURCES_TABLE_ID')
     const badId = createContentHubApi({ ...env, VITE_NOCODB_RSS_SOURCES_TABLE_ID: 'rss_sources' }, fetcher)
     await expect(badId.listRssSources()).rejects.toThrow('VITE_NOCODB_RSS_SOURCES_TABLE_ID')
-    const noToken = createContentHubApi({ ...env, VITE_NOCODB_TOKEN: 'your_token_here' }, fetcher)
-    await expect(noToken.listRssSources()).rejects.toThrow('VITE_NOCODB_TOKEN')
+    expect(fetcher).not.toHaveBeenCalled()
+  })
+
+  it('NocoDB 默认走同源代理，读取和更新都不携带 API 令牌', async () => {
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json(production))
+      .mockResolvedValueOnce(Response.json([{ Id: 7 }]))
+      .mockResolvedValueOnce(Response.json({ ...production, is_benchmark: true }))
+    const api = createContentHubApi({ ...env, VITE_NOCODB_API_URL: undefined }, fetcher)
+    await expect(api.getProductionItem(7)).resolves.toMatchObject({ id: 7 })
+    await expect(api.updateProductionItem(7, { is_benchmark: true })).resolves.toMatchObject({ is_benchmark: true })
+    const path = '/api/nocodb/tables/mtestproduct1234/records'
+    expect(fetcher.mock.calls.map(([url, init]) => [url, init?.method])).toEqual([
+      [path + '/7', 'GET'], [path, 'PATCH'], [path + '/7', 'GET'],
+    ])
+    for (const [, init] of fetcher.mock.calls) {
+      const headers = new Headers(init?.headers)
+      expect(headers.has('xc-token')).toBe(false)
+      expect(headers.has('Authorization')).toBe(false)
+      expect(headers.get('Accept')).toBe('application/json')
+    }
+  })
+
+  it.each([401, 403])('NocoDB 代理返回 %i 时保留状态码和鉴权提示', async status => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(new Response(null, { status }))
+    await expect(createContentHubApi(env, fetcher).listRssSources()).rejects.toMatchObject({
+      status, message: expect.stringContaining('请检查服务器 NocoDB 代理鉴权配置'),
+    })
+  })
+
+  it('拒绝跨源代理路径，并在发请求前报告配置错误', async () => {
+    const fetcher = vi.fn<typeof fetch>()
+    const invalid = createContentHubApi({
+      ...env,
+      VITE_NOCODB_API_URL: 'https://external-api.example.invalid/api/v2',
+      VITE_N8N_WEBHOOK_BASE_URL: '//external-api.example.invalid/webhook',
+      VITE_WF2_GENERATE_WEBHOOK_URL: 'https://external-api.example.invalid/generate',
+      VITE_WF3_RENDER_WEBHOOK_URL: '//external-api.example.invalid/render',
+    }, fetcher)
+    await expect(invalid.listRssSources()).rejects.toThrow('VITE_NOCODB_API_URL')
+    await expect(invalid.triggerWebhook('rss-sync-now', {})).rejects.toThrow('VITE_N8N_WEBHOOK_BASE_URL')
+    await expect(invalid.triggerGenerateDraft(7)).rejects.toThrow('VITE_WF2_GENERATE_WEBHOOK_URL')
+    await expect(invalid.triggerRender(7)).rejects.toThrow('VITE_WF3_RENDER_WEBHOOK_URL')
     expect(fetcher).not.toHaveBeenCalled()
   })
 
@@ -314,12 +354,12 @@ describe('NocoDB v2 与真实模式', () => {
     expect(await api.listRssSources('production')).toEqual([{ ...sourceInput, id: sourceId, created_at: sourceCreatedAt }])
     const calls = fetcher.mock.calls
     const [firstUrl, firstOptions] = calls[0]
-    expect(new URL(String(firstUrl)).pathname).toBe('/api/v2/tables/mtestsource12345/records')
-    expect(new URL(String(firstUrl)).searchParams.get('offset')).toBe('0')
-    expect(new URL(String(firstUrl)).searchParams.get('limit')).toBe('100')
-    expect(new URL(String(firstUrl)).searchParams.get('sort')).toBe('Id')
-    expect(new Headers(firstOptions?.headers).get('xc-token')).toBe('test-only')
-    expect(new URL(String(calls[1][0])).searchParams.get('offset')).toBe('1')
+    expect(new URL(String(firstUrl), 'https://contenthub.example.invalid').pathname).toBe('/backend/nocodb/tables/mtestsource12345/records')
+    expect(new URL(String(firstUrl), 'https://contenthub.example.invalid').searchParams.get('offset')).toBe('0')
+    expect(new URL(String(firstUrl), 'https://contenthub.example.invalid').searchParams.get('limit')).toBe('100')
+    expect(new URL(String(firstUrl), 'https://contenthub.example.invalid').searchParams.get('sort')).toBe('Id')
+    expect(new Headers(firstOptions?.headers).get('xc-token')).toBeNull()
+    expect(new URL(String(calls[1][0]), 'https://contenthub.example.invalid').searchParams.get('offset')).toBe('1')
     expect(fetcher).toHaveBeenCalledTimes(2)
   })
 
@@ -343,7 +383,7 @@ describe('NocoDB v2 与真实模式', () => {
     expect(row).toMatchObject({ id: 7, suggested_titles: ['标题一', '标题二', '标题三'], published_at: '' })
     expect(row).toMatchObject({ raw_content: '', draft_md: '' })
     expect(row).not.toHaveProperty('Id')
-    expect(fetcher.mock.calls[0][0]).toBe('https://nocodb.example.invalid/api/v2/tables/mtestproduct1234/records/7')
+    expect(fetcher.mock.calls[0][0]).toBe('/backend/nocodb/tables/mtestproduct1234/records/7')
   })
 
   it('PATCH 和 POST 使用原始字段数组，请求成功后按主键回读', async () => {
@@ -356,7 +396,7 @@ describe('NocoDB v2 与真实模式', () => {
     expect(await api.setRssSourceActive(12, false)).toMatchObject({ id: 12, is_active: false })
     expect(await api.createRssSource(sourceInput)).toMatchObject({ id: 13, created_at: sourceCreatedAt })
     const [[patchUrl, patch], [getUrl], [postUrl, post], [createdUrl]] = fetcher.mock.calls
-    expect(patchUrl).toBe('https://nocodb.example.invalid/api/v2/tables/mtestsource12345/records')
+    expect(patchUrl).toBe('/backend/nocodb/tables/mtestsource12345/records')
     expect(patch).toMatchObject({ method: 'PATCH', body: JSON.stringify([{ is_active: false, Id: 12 }]) })
     expect(getUrl).toBe(patchUrl + '/12')
     expect(postUrl).toBe(patchUrl)
@@ -429,9 +469,8 @@ describe('RSS 采集配置', () => {
     ...env,
     VITE_NOCODB_RSS_SYNC_SETTINGS_TABLE_ID: 'mtestsync1',
     VITE_NOCODB_RSS_SYNC_SETTINGS_RECORD_ID: '7',
-    VITE_WEBHOOK_SECRET: 'test-only-rss-header',
   }
-  const configUrl = 'https://nocodb.example.invalid/api/v2/tables/mtestsync1/records'
+  const configUrl = '/backend/nocodb/tables/mtestsync1/records'
 
   it('读取同一配置行，直接保存频率并回读，手动采集走 n8n', async () => {
     const previous = { Id: 7, sync_interval_hours: '6', last_synced_at: '2026-11-22T09:20:00Z' }
@@ -447,16 +486,16 @@ describe('RSS 采集配置', () => {
 
     expect(fetcher.mock.calls.map(([url, options]) => [url, options?.method])).toEqual([
       [configUrl + '/7', 'GET'], [configUrl, 'PATCH'], [configUrl + '/7', 'GET'],
-      ['https://n8n.example.invalid/webhook/rss-sync-now', 'POST'],
+      ['/backend/n8n/rss-sync-now', 'POST'],
     ])
     const patch = fetcher.mock.calls[1][1]
     expect(JSON.parse(String(patch?.body))).toEqual([{ Id: 7, sync_interval_hours: 0 }])
-    expect(new Headers(patch?.headers).get('xc-token')).toBe('test-only')
+    expect(new Headers(patch?.headers).get('xc-token')).toBeNull()
     expect(new Headers(patch?.headers).get('X-Hub-Token')).toBeNull()
     const webhook = fetcher.mock.calls[3][1]
     expect(JSON.parse(String(webhook?.body))).toEqual({})
     expect(new Headers(webhook?.headers).get('xc-token')).toBeNull()
-    expect(new Headers(webhook?.headers).get('X-Hub-Token')).toBe('test-only-rss-header')
+    expect(new Headers(webhook?.headers).get('X-Hub-Token')).toBeNull()
     expect(webhook?.redirect).toBe('error')
   })
 
@@ -506,14 +545,14 @@ describe('n8n Webhook', () => {
     const fetcher = vi.fn<typeof fetch>()
       .mockResolvedValueOnce(new Response('queued', { status: 202 }))
       .mockResolvedValueOnce(new Response(null, { status: 204 }))
-    const api = createContentHubApi({ ...env, VITE_WEBHOOK_SECRET: 'test-only-rss-header' }, fetcher)
+    const api = createContentHubApi(env, fetcher)
     const draft = { production_id: 7 }
     const rewrite = { production_id: 7, revision_note: '复核样本量' }
     expect(await api.triggerWebhook('fetch-and-draft', draft)).toEqual({ accepted: true, status: 202 })
     expect(await api.triggerWebhook('rewrite-draft', rewrite)).toEqual({ accepted: true, status: 204 })
     for (const [index, action, payload] of [[0, 'fetch-and-draft', draft], [1, 'rewrite-draft', rewrite]] as const) {
       const [url, options] = fetcher.mock.calls[index]
-      expect(url).toBe('https://n8n.example.invalid/webhook/' + action)
+      expect(url).toBe('/backend/n8n/' + action)
       expect(options).toMatchObject({ method: 'POST', body: JSON.stringify(payload) })
       expect(new Headers(options?.headers).get('content-type')).toBe('application/json')
       expect(new Headers(options?.headers).get('xc-token')).toBeNull()
@@ -545,12 +584,12 @@ describe('n8n Webhook', () => {
       .resolves.toEqual({ accepted: true, status: 202, jobId: 'job-1', downloadUrl: null })
   })
 
-  it('Webhook HTTP 失败向调用方传播，缺配置显式失败', async () => {
+  it('Webhook HTTP 失败向调用方传播，非法覆盖地址显式失败', async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(new Response(null, { status: 500 }))
     const api = createContentHubApi(env, fetcher)
     await expect(api.triggerWebhook('fetch-and-draft', { production_id: 7 })).rejects.toMatchObject({ status: 500 })
-    const missingBase = createContentHubApi({ VITE_USE_MOCK: 'false' }, fetcher)
-    await expect(missingBase.triggerWebhook('fetch-and-draft', { production_id: 7 }))
+    const invalidBase = createContentHubApi({ VITE_USE_MOCK: 'false', VITE_N8N_WEBHOOK_BASE_URL: '//invalid.example' }, fetcher)
+    await expect(invalidBase.triggerWebhook('fetch-and-draft', { production_id: 7 }))
       .rejects.toThrow('VITE_N8N_WEBHOOK_BASE_URL')
     expect(fetcher).toHaveBeenCalledTimes(1)
   })

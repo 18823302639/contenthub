@@ -1,6 +1,5 @@
 import { Copy, LoaderCircle, X } from 'lucide-react'
 import { useEffect, useId, useRef, useState } from 'react'
-import { wf3NotConfigured } from '../../api'
 import type { ContentHubApi, ProductionUpdate } from '../../api'
 import type { RecordWrites } from '../../app/useRecordWrites'
 import { productionRiskLabel } from '../../types/schema'
@@ -98,7 +97,7 @@ function DeskEditor({ api, record: initial, writes, onSaved, requestClose, regis
   const renderReason = parsed.error || (!parsed.value ? '请先填写 Remotion JSON。' : null) ||
     (sourceIssues ? '请补齐渲染来源：' + sourceIssues : null) ||
     (productionRiskLabel(record.compliance_risk) === '高风险' ? '高风险稿件需先人工复核并降低风险等级。' : null) ||
-    (api.wf3Configured && !sameRemotion(savedRender.value, parsed.value) ? '请先保存当前渲染数据。' : null)
+    (!sameRemotion(savedRender.value, parsed.value) ? '请先保存当前渲染数据。' : null)
   const saveDisabled = busy || (main && Boolean(parsed.error))
   const canFinalize = Boolean(values.title.trim() && values.article.trim())
   const seconds = Math.ceil(length(values.script) * 60 / 260)
@@ -160,10 +159,6 @@ function DeskEditor({ api, record: initial, writes, onSaved, requestClose, regis
 
   async function renderVideo() {
     if (!main || renderReason || busy) return
-    if (!api.wf3Configured) {
-      setNotice({ text: wf3NotConfigured })
-      return
-    }
     const release = writes.acquire(record.id)
     if (!release) return
     setNotice(null)

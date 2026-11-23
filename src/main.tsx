@@ -11,7 +11,7 @@ if (!root) throw new Error('找不到 ContentHub 的挂载节点。')
 const app = createRoot(root)
 
 try {
-  const api = createContentHubApi(import.meta.env)
+  const api = createContentHubApi(__CONTENTHUB_ENV__)
   app.render(
     <StrictMode>
       <HashRouter><ContentHubApp api={api} /></HashRouter>
