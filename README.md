@@ -73,6 +73,8 @@ npm run preview -- --host 127.0.0.1
 - 「放弃」保存「已放弃」并停止该条前端轮询，已发布和已放弃的选题不提供放弃按钮。Mock 不会用较迟完成的初稿覆盖已放弃状态。真实工作流须自行校验记录状态和执行标识，以避免并发写入或重复执行。前端按一次操作控制提交次数。
 - 「进入改稿台」打开 `#/workbench/:id`。在改稿台点击「返回选题看板」时，会恢复进入前的筛选。
 
+选题看板和信源管理顶部共用 RSS 采集控件。「立即采集」在 Webhook 受理后刷新当前列表并保留筛选，采集流程仍会在后台执行。「自动采集频率」选中即保存，0 表示暂停。上次采集时间按浏览器本地时区显示，可通过页面刷新按钮重新读取。
+
 ## 改稿台用法
 
 - 在看板选择「进入改稿台」，也可直接打开 `#/workbench/3` 查看 Mock 初稿，或打开 `#/workbench/4` 查看已有定稿。左栏可切换原文素材与 AI 事实核查清单。窄屏使用工具栏的「跳到稿件」直达当前稿件视图。
@@ -184,6 +186,7 @@ ContentHub/
 | --- | --- |
 | 选题列表与改稿台 | `listProductionItems({ trackTag, minScore, status })`、`getProductionItem(id)` |
 | 确认、放弃、提交修改意见、保存定稿或发布 | `updateProductionItem(id, changes)` |
+| 采集频率和上次采集时间 | `getRssSyncSettings()`、`setRssSyncInterval(hours)` |
 | 信源列表、启停和新增 | `listRssSources(poolType?)`、`setRssSourceActive(id, active)`、`createRssSource(source)` |
 | 雷达机会 | `listRadarItems({ minCommercialScore, minInfoGapScore })`，两个下限均为含等号 |
 | 运营数据 | `listAccountMetrics(since?)`、`createAccountMetric(metric)`，`since` 为含该时间点的下界 |
@@ -205,6 +208,7 @@ ContentHub/
 | 业务表 | NocoDB Table ID 配置 |
 | --- | --- |
 | `rss_sources` | `VITE_NOCODB_RSS_SOURCES_TABLE_ID` |
+| 采集配置表 | `VITE_NOCODB_RSS_SYNC_SETTINGS_TABLE_ID`，另需配置记录主键 `VITE_NOCODB_RSS_SYNC_SETTINGS_RECORD_ID` |
 | `production_pool` | `VITE_NOCODB_PRODUCTION_POOL_TABLE_ID` |
 | `radar_pool` | `VITE_NOCODB_RADAR_POOL_TABLE_ID` |
 | `account_metrics` | `VITE_NOCODB_ACCOUNT_METRICS_TABLE_ID` |
@@ -217,6 +221,10 @@ ContentHub/
 - n8n 以 `VITE_N8N_WEBHOOK_BASE_URL` 为基础地址，JSON body 通过 POST 发往 `${VITE_N8N_WEBHOOK_BASE_URL}/${action}`。初稿和改稿的 2xx 回执表示请求受理，完成结果通过 NocoDB 回读。视频工作流在 2xx JSON 回执中返回 `{ jobId, downloadUrl }`。`jobId` 为非空字符串，`downloadUrl` 由后端签发，单视频有效期 24 小时。缺少合法 HTTP(S) 下载链接时，改稿台仍显示有效任务 ID。 [n8n Webhook](https://docs.n8n.io/integrations/builtin/core-nodes/n8n-nodes-base.webhook/)
 
 真实部署待实测项目包括 PostgreSQL 外部表在 NocoDB 中暴露的字段名和类型、主键和创建时间默认值、标题 JSON 与日期的实际序列化、单条写入回执及分页上限，以及已激活的 n8n 工作流对 payload 的解析、鉴权和写回状态。接口测试使用合成响应，未连接真实 NocoDB、n8n 和渲染机。
+
+### RSS 采集接口
+
+仓库内缺少既有后端的采集配置定义。当前适配以 NocoDB 单条配置记录为联调约定，需填写实际 Table ID 和现有记录主键。前端用既有 `xc-token` 读取与更新该行，切换频率只写数值字段 `interval_hours`，允许值为 0、1、3、6、12、24。后端调度读取该字段，手动采集通过既有 n8n 基础路径向 `POST /rss-sync-now` 发送空 JSON 对象。工作流采集完成后在同一行写入带时区的 `last_synced_at`。Mock 只模拟配置和完成时间，真实接口需联调验证。
 
 ### 受理、完成与重试
 

@@ -27,6 +27,15 @@ export type DemandType = (typeof demandTypes)[number]
 export const platforms = ['公众号', '头条', 'B站'] as const
 export type Platform = (typeof platforms)[number]
 
+export const rssSyncIntervals = [0, 1, 3, 6, 12, 24] as const
+export type RssSyncInterval = (typeof rssSyncIntervals)[number]
+
+export interface RssSyncSettings {
+  id: number
+  interval_hours: RssSyncInterval | null
+  last_synced_at: string | null
+}
+
 export interface RssSource {
   id: number
   name: string

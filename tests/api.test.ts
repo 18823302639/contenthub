@@ -424,6 +424,67 @@ describe('NocoDB v2 与真实模式', () => {
   })
 })
 
+describe('RSS 采集配置', () => {
+  const settingsEnv = {
+    ...env,
+    VITE_NOCODB_RSS_SYNC_SETTINGS_TABLE_ID: 'mtestsync1',
+    VITE_NOCODB_RSS_SYNC_SETTINGS_RECORD_ID: '7',
+  }
+  const configUrl = 'https://nocodb.example.invalid/api/v2/tables/mtestsync1/records'
+
+  it('读取同一配置行，直接保存频率并回读，手动采集走 n8n', async () => {
+    const previous = { Id: 7, interval_hours: '6', last_synced_at: '2026-11-22T09:20:00Z' }
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json(previous))
+      .mockResolvedValueOnce(Response.json([{ Id: 7 }]))
+      .mockResolvedValueOnce(Response.json({ ...previous, interval_hours: 0 }))
+      .mockResolvedValueOnce(new Response(null, { status: 202 }))
+    const api = createContentHubApi(settingsEnv, fetcher)
+    await expect(api.getRssSyncSettings()).resolves.toEqual({ id: 7, interval_hours: 6, last_synced_at: previous.last_synced_at })
+    await expect(api.setRssSyncInterval(0)).resolves.toEqual({ id: 7, interval_hours: 0, last_synced_at: previous.last_synced_at })
+    await expect(api.triggerWebhook('rss-sync-now', {})).resolves.toEqual({ accepted: true, status: 202 })
+
+    expect(fetcher.mock.calls.map(([url, options]) => [url, options?.method])).toEqual([
+      [configUrl + '/7', 'GET'], [configUrl, 'PATCH'], [configUrl + '/7', 'GET'],
+      ['https://n8n.example.invalid/webhook/rss-sync-now', 'POST'],
+    ])
+    const patch = fetcher.mock.calls[1][1]
+    expect(JSON.parse(String(patch?.body))).toEqual([{ Id: 7, interval_hours: 0 }])
+    expect(new Headers(patch?.headers).get('xc-token')).toBe('test-only')
+    const webhook = fetcher.mock.calls[3][1]
+    expect(JSON.parse(String(webhook?.body))).toEqual({})
+    expect(new Headers(webhook?.headers).get('xc-token')).toBeNull()
+  })
+
+  it('配置记录 ID 缺失时不发写入，未知频率和无日期保留为空值', async () => {
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ Id: 7, interval_hours: 8, last_synced_at: null }))
+    await expect(createContentHubApi({ ...settingsEnv, VITE_NOCODB_RSS_SYNC_SETTINGS_RECORD_ID: '' }, fetcher)
+      .setRssSyncInterval(24)).rejects.toThrow('VITE_NOCODB_RSS_SYNC_SETTINGS_RECORD_ID')
+    expect(fetcher).not.toHaveBeenCalled()
+    await expect(createContentHubApi(settingsEnv, fetcher).getRssSyncSettings())
+      .resolves.toEqual({ id: 7, interval_hours: null, last_synced_at: null })
+  })
+
+  it('离线 Mock 保存频率，手动采集完成后回写时间', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-11-22T08:00:00Z'))
+    const fetcher = vi.fn<typeof fetch>()
+    const api = createContentHubApi({}, fetcher)
+    const change = api.setRssSyncInterval(3)
+    await vi.advanceTimersByTimeAsync(180)
+    await expect(change).resolves.toMatchObject({ interval_hours: 3, last_synced_at: null })
+    const collect = api.triggerWebhook('rss-sync-now', {})
+    await vi.advanceTimersByTimeAsync(180)
+    await expect(collect).resolves.toMatchObject({ accepted: true, status: 202 })
+    await vi.advanceTimersByTimeAsync(900)
+    const read = api.getRssSyncSettings()
+    await vi.advanceTimersByTimeAsync(180)
+    await expect(read).resolves.toMatchObject({ interval_hours: 3, last_synced_at: '2026-11-22T08:00:01.260Z' })
+    expect(fetcher).not.toHaveBeenCalled()
+  })
+})
+
 describe('n8n Webhook', () => {
   it('接受 n8n 默认 JSON、非 JSON 响应与空的 2xx 回执', async () => {
     const fetcher = vi.fn<typeof fetch>()

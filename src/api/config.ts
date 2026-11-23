@@ -6,6 +6,8 @@ export interface ContentHubEnv {
   readonly VITE_NOCODB_TOKEN?: string
   readonly VITE_N8N_WEBHOOK_BASE_URL?: string
   readonly VITE_NOCODB_RSS_SOURCES_TABLE_ID?: string
+  readonly VITE_NOCODB_RSS_SYNC_SETTINGS_TABLE_ID?: string
+  readonly VITE_NOCODB_RSS_SYNC_SETTINGS_RECORD_ID?: string
   readonly VITE_NOCODB_PRODUCTION_POOL_TABLE_ID?: string
   readonly VITE_NOCODB_RADAR_POOL_TABLE_ID?: string
   readonly VITE_NOCODB_ACCOUNT_METRICS_TABLE_ID?: string
@@ -15,6 +17,7 @@ export interface ContentHubEnv {
 
 const tableKeys = {
   rss_sources: 'VITE_NOCODB_RSS_SOURCES_TABLE_ID',
+  rss_sync_settings: 'VITE_NOCODB_RSS_SYNC_SETTINGS_TABLE_ID',
   production_pool: 'VITE_NOCODB_PRODUCTION_POOL_TABLE_ID',
   radar_pool: 'VITE_NOCODB_RADAR_POOL_TABLE_ID',
   account_metrics: 'VITE_NOCODB_ACCOUNT_METRICS_TABLE_ID',
@@ -36,6 +39,15 @@ export function readTableId(env: ContentHubEnv, table: TableName): string {
     throw new Error(`${key} 必须配置为 NocoDB 中显示的 Table ID（以 m 开头）。`)
   }
   return value
+}
+
+export function readRssSyncSettingsId(env: ContentHubEnv): number {
+  const input = env.VITE_NOCODB_RSS_SYNC_SETTINGS_RECORD_ID?.trim() ?? ''
+  const id = Number(input)
+  if (!/^[1-9]\d*$/.test(input) || !Number.isSafeInteger(id)) {
+    throw new Error('VITE_NOCODB_RSS_SYNC_SETTINGS_RECORD_ID 必须配置为采集配置记录的正整数主键。')
+  }
+  return id
 }
 
 export function readBaseUrl(value: string | undefined, key: keyof ContentHubEnv): string {

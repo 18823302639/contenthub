@@ -4,6 +4,8 @@ import type { ReactNode } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { matchesProductionFilters } from '../../api'
 import { productionTracks, workflowStatuses } from '../../types/schema'
+import { RssSyncControls } from '../rssSync/RssSyncControls'
+import type { useRssSync } from '../rssSync/useRssSync'
 import { TopicCard, TopicFeedback } from './TopicCard'
 import { isActivityError, isMutationBlocked } from './useTopicBoard'
 import type { useTopicBoard } from './useTopicBoard'
@@ -28,7 +30,10 @@ function FilterField({ label, value, onChange, children }: {
   )
 }
 
-export function TopicsPage({ board }: { board: ReturnType<typeof useTopicBoard> }) {
+export function TopicsPage({ board, rssSync }: {
+  board: ReturnType<typeof useTopicBoard>
+  rssSync: ReturnType<typeof useRssSync>
+}) {
   const { ensureLoaded, items, loading, loadError, activities, lastActivityId, refresh } = board
   const [query, setQuery] = useSearchParams()
 
@@ -72,11 +77,12 @@ export function TopicsPage({ board }: { board: ReturnType<typeof useTopicBoard> 
           <h1 id="topics-title">选题看板</h1>
           <p>筛选候选选题，确认后交给 AI 生成初稿。</p>
         </div>
-        <button className="button button--secondary refresh-button" onClick={() => void refresh()} disabled={loading}>
+        <button className="button button--secondary refresh-button" onClick={() => { void refresh(); void rssSync.refreshSettings() }} disabled={loading}>
           <RefreshCw size={15} className={loading ? 'refresh-spinning' : undefined} aria-hidden />刷新列表
         </button>
       </header>
 
+      <RssSyncControls model={rssSync} />
       <div className="filters" aria-label="筛选选题" role="group">
         <FilterField label="赛道" value={track} onChange={value => select('track', value)}>
           <option value="">全部赛道</option>

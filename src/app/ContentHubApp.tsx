@@ -1,8 +1,9 @@
 import { ArrowLeft, ChartNoAxesCombined, ChevronRight, Layers3, LayoutGrid, Rss, SquarePen } from 'lucide-react'
-import { lazy, Suspense, useRef } from 'react'
+import { lazy, Suspense, useEffect, useRef } from 'react'
 import { Link, Navigate, NavLink, Route, Routes, useLocation } from 'react-router-dom'
 import type { ContentHubApi } from '../api'
 import { useAnalytics } from '../features/analytics/useAnalytics'
+import { useRssSync } from '../features/rssSync/useRssSync'
 import { SourcesPage } from '../features/sources/SourcesPage'
 import { useSources } from '../features/sources/useSources'
 import { TopicsPage } from '../features/topics/TopicsPage'
@@ -38,6 +39,17 @@ export function ContentHubApp({ api }: { api: ContentHubApi }) {
   const sources = useSources(api)
   const analytics = useAnalytics(api)
   const { pathname } = useLocation()
+  const syncPage = pathname === '/topics' || pathname === '/sources' ? pathname : null
+  const rssSync = useRssSync(api, syncPage)
+  const refreshedCollection = useRef(0)
+  const refreshCollectionList = syncPage === '/sources' ? sources.refresh : syncPage === '/topics' ? board.refresh : null
+  const collectionListBusy = syncPage === '/sources' ? sources.loading || sources.writing : board.loading
+
+  useEffect(() => {
+    if (!refreshCollectionList || collectionListBusy || refreshedCollection.current === rssSync.acceptedCount) return
+    refreshedCollection.current = rssSync.acceptedCount
+    void refreshCollectionList()
+  }, [collectionListBusy, refreshCollectionList, rssSync.acceptedCount])
   const active = links.find(link => pathname === link.to || pathname.startsWith(link.to + '/'))
   const mode = api.mode === 'mock' ? 'Mock · 离线演示' : '真实数据模式'
 
@@ -77,13 +89,13 @@ export function ContentHubApp({ api }: { api: ContentHubApi }) {
         <main className="workspace-content" id="content-start" tabIndex={-1}>
           <Routes>
             <Route index element={<Navigate to="/topics" replace />} />
-            <Route path="/topics" element={<TopicsPage board={board} />} />
+            <Route path="/topics" element={<TopicsPage board={board} rssSync={rssSync} />} />
             <Route path="/workbench" element={<Placeholder title="改稿台" text="从选题看板选择一条选题进入改稿台。" />} />
             <Route path="/workbench/:id" element={(
               <WorkbenchPage api={api} writes={writes} sessions={workbenchSessions.current}
                 onWrite={board.observeWorkbenchWrite} refreshBoard={board.refreshIfLoaded} />
             )} />
-            <Route path="/sources" element={<SourcesPage model={sources} />} />
+            <Route path="/sources" element={<SourcesPage model={sources} rssSync={rssSync} />} />
             <Route path="/analytics" element={(
               <Suspense fallback={<p className="results-count" role="status">正在加载运营数据…</p>}>
                 <AnalyticsPage model={analytics} />

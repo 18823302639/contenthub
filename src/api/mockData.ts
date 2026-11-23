@@ -9,6 +9,7 @@ export function makeMockData(now: number): MockData {
   const date = (daysAgo: number) => new Date(now - daysAgo * day).toISOString()
 
   return {
+    rss_sync_settings: [{ id: 1, interval_hours: 6, last_synced_at: null }],
     rss_sources: [
       {
         id: 1,

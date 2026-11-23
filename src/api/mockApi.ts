@@ -14,6 +14,7 @@ export function createMockBackend() {
   const data = makeMockData(Date.now())
   const activeJobs = new Set<number>()
   let nextVideoJobId = 1
+  let collecting = false
 
   function find<T extends TableName>(table: T, id: number): Tables[T] {
     const row = data[table].find(row => row.id === id)
@@ -67,6 +68,16 @@ export function createMockBackend() {
     const [action, payload] = structuredClone(request)
     await delay()
 
+    if (action === 'rss-sync-now') {
+      if (!collecting) {
+        collecting = true
+        setTimeout(() => {
+          collecting = false
+          data.rss_sync_settings[0].last_synced_at = new Date().toISOString()
+        }, workflowDelayMs)
+      }
+      return { accepted: true, status: 202 }
+    }
     const item = find('production_pool', payload.production_id)
     if (action === 'generate-video') {
       return {

@@ -1,5 +1,6 @@
+import { rssSyncIntervals } from '../types/schema'
 import type { ContentHubEnv } from './config'
-import { readMode } from './config'
+import { readMode, readRssSyncSettingsId } from './config'
 import type { ContentHubApi, WebhookRequest } from './contracts'
 import { createMockBackend } from './mockApi'
 import { createNocodbClient } from './nocodbClient'
@@ -8,6 +9,7 @@ import { matchesProductionFilters } from './productionFilters'
 import { createWebhookClient } from './webhookClient'
 
 export type { ContentHubEnv } from './config'
+export type { RssSyncInterval, RssSyncSettings } from '../types/schema'
 export type {
   ContentHubApi, NewAccountMetric, NewRssSource, ProductionFilters, ProductionUpdate,
   RadarFilters, VideoFormat, VideoVoice, WebhookAction, WebhookPayloads, WebhookReceipt,
@@ -25,6 +27,7 @@ export function createContentHubApi(env: ContentHubEnv, fetcher: typeof fetch = 
   const { store, triggerWebhook } = mode === 'mock'
     ? createMockBackend()
     : { store: createNocodbClient(env, fetcher), triggerWebhook: createWebhookClient(env, fetcher) }
+  const rssSyncSettingsId = () => mode === 'mock' ? 1 : readRssSyncSettingsId(env)
 
   return {
     mode,
@@ -40,6 +43,13 @@ export function createContentHubApi(env: ContentHubEnv, fetcher: typeof fetch = 
     async listRssSources(poolType) {
       const rows = await store.list('rss_sources')
       return poolType === undefined ? rows : rows.filter(row => row.pool_type === poolType)
+    },
+    async getRssSyncSettings() {
+      return store.get('rss_sync_settings', rssSyncSettingsId())
+    },
+    async setRssSyncInterval(hours) {
+      if (!rssSyncIntervals.includes(hours)) throw new Error('请选择支持的采集频率。')
+      return store.update('rss_sync_settings', rssSyncSettingsId(), { interval_hours: hours })
     },
     createRssSource: source => store.create('rss_sources', source),
     setRssSourceActive: (id, active) => store.update('rss_sources', id, { is_active: active }),
@@ -60,8 +70,7 @@ export function createContentHubApi(env: ContentHubEnv, fetcher: typeof fetch = 
     listPostMetrics: () => store.list('post_metrics'),
     createAccountMetric: metric => store.create('account_metrics', metric),
     async triggerWebhook(...request: WebhookRequest) {
-      const [, payload] = request
-      requireRecordId(payload.production_id)
+      if (request[0] !== 'rss-sync-now') requireRecordId(request[1].production_id)
       return triggerWebhook(...request)
     },
     async probeVideoDownload(downloadUrl, signal) {

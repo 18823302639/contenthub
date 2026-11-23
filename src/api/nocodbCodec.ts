@@ -1,4 +1,4 @@
-import { complianceRisks, demandTypes, platforms, poolTypes, productionTracks, workflowStatuses } from '../types/schema'
+import { complianceRisks, demandTypes, platforms, poolTypes, productionTracks, rssSyncIntervals, workflowStatuses } from '../types/schema'
 import type { AccountMetric, ProductionItem } from '../types/schema'
 import { isCalendarDay } from '../utils/metricDays'
 import type { TableName, Tables } from './contracts'
@@ -133,6 +133,15 @@ function readMetrics(row: Row, id: number): AccountMetric {
 const optionalProductionFields = ['raw_content', 'fact_check', 'draft_md', 'final_md', 'revision_note'] as const
 
 const decode: Decoders = {
+  rss_sync_settings: (row, id) => {
+    const hours = readNumber(row, 'interval_hours')
+    return {
+      id,
+      interval_hours: rssSyncIntervals.find(option => option === hours) ?? null,
+      last_synced_at: readDate(row, 'last_synced_at') || null,
+    }
+  },
+
   rss_sources: (row, id) => ({
     id,
     name: readText(row, 'name'),

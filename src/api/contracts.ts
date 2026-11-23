@@ -1,4 +1,4 @@
-import type { AccountMetric, Platform, PoolType, PostMetric, ProductionItem, RadarItem, RssSource, WorkflowStatus } from '../types/schema'
+import type { AccountMetric, Platform, PoolType, PostMetric, ProductionItem, RadarItem, RssSource, RssSyncInterval, RssSyncSettings, WorkflowStatus } from '../types/schema'
 
 export interface ProductionFilters {
   trackTag?: string
@@ -30,6 +30,7 @@ export interface WebhookPayloads {
   'fetch-and-draft': { production_id: number }
   'rewrite-draft': { production_id: number; revision_note: string }
   'generate-video': { production_id: number; format: VideoFormat; voice: VideoVoice }
+  'rss-sync-now': Record<string, never>
 }
 
 export type WebhookAction = keyof WebhookPayloads
@@ -50,6 +51,8 @@ export interface ContentHubApi {
   getProductionItem(id: number): Promise<ProductionItem>
   updateProductionItem(id: number, changes: ProductionUpdate): Promise<ProductionItem>
   listRssSources(poolType?: PoolType): Promise<RssSource[]>
+  getRssSyncSettings(): Promise<RssSyncSettings>
+  setRssSyncInterval(hours: RssSyncInterval): Promise<RssSyncSettings>
   createRssSource(source: NewRssSource): Promise<RssSource>
   setRssSourceActive(id: number, active: boolean): Promise<RssSource>
   listRadarItems(filters?: RadarFilters): Promise<RadarItem[]>
@@ -63,6 +66,7 @@ export interface ContentHubApi {
 
 export interface Tables {
   rss_sources: RssSource
+  rss_sync_settings: RssSyncSettings
   production_pool: ProductionItem
   radar_pool: RadarItem
   account_metrics: AccountMetric

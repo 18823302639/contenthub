@@ -4,6 +4,8 @@ import { useSearchParams } from 'react-router-dom'
 import type { NewRssSource } from '../../api'
 import { poolTypes } from '../../types/schema'
 import type { PoolType, RssSource } from '../../types/schema'
+import { RssSyncControls } from '../rssSync/RssSyncControls'
+import type { useRssSync } from '../rssSync/useRssSync'
 import { AddSourceDialog } from './AddSourceDialog'
 import { poolLabels, rssUrl } from './sourceFields'
 import type { useSources } from './useSources'
@@ -122,7 +124,10 @@ function SourceEntries({ rows, model }: { rows: RssSource[]; model: SourcesModel
   )
 }
 
-export function SourcesPage({ model }: { model: SourcesModel }) {
+export function SourcesPage({ model, rssSync }: {
+  model: SourcesModel
+  rssSync: ReturnType<typeof useRssSync>
+}) {
   const { ensureLoaded, rows, loading, loadError, refresh, notice } = model
   const [query, setQuery] = useSearchParams()
   const [dialogId, setDialogId] = useState<number | null>(null)
@@ -183,7 +188,7 @@ export function SourcesPage({ model }: { model: SourcesModel }) {
           <p>维护生产池和雷达池的 RSS 信源。</p>
         </div>
         <div className="page-actions">
-          <button className="button button--secondary" onClick={() => void refresh()} disabled={loading || model.writing}>
+          <button className="button button--secondary" onClick={() => { void refresh(); void rssSync.refreshSettings() }} disabled={loading || model.writing}>
             <RefreshCw size={15} className={loading ? 'refresh-spinning' : undefined} aria-hidden />刷新信源
           </button>
           <button className="button button--primary" ref={opener} disabled={!rows} aria-disabled={dialogBusy || undefined}
@@ -193,6 +198,7 @@ export function SourcesPage({ model }: { model: SourcesModel }) {
         </div>
       </header>
 
+      <RssSyncControls model={rssSync} />
       <div className="sources-filters" role="group" aria-label="按分组筛选">
         <button className="button button--quiet" aria-pressed={!pool} onClick={() => choose()}>全部</button>
         {poolTypes.map(option => (
