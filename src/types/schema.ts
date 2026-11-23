@@ -32,7 +32,7 @@ export type RssSyncInterval = (typeof rssSyncIntervals)[number]
 
 export interface RssSyncSettings {
   id: number
-  interval_hours: RssSyncInterval | null
+  sync_interval_hours: RssSyncInterval | null
   last_synced_at: string | null
 }
 

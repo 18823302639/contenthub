@@ -208,7 +208,7 @@ ContentHub/
 | 业务表 | NocoDB Table ID 配置 |
 | --- | --- |
 | `rss_sources` | `VITE_NOCODB_RSS_SOURCES_TABLE_ID` |
-| 采集配置表 | `VITE_NOCODB_RSS_SYNC_SETTINGS_TABLE_ID`，另需配置记录主键 `VITE_NOCODB_RSS_SYNC_SETTINGS_RECORD_ID` |
+| `sync_settings` | `VITE_NOCODB_RSS_SYNC_SETTINGS_TABLE_ID`，另需配置记录主键 `VITE_NOCODB_RSS_SYNC_SETTINGS_RECORD_ID` |
 | `production_pool` | `VITE_NOCODB_PRODUCTION_POOL_TABLE_ID` |
 | `radar_pool` | `VITE_NOCODB_RADAR_POOL_TABLE_ID` |
 | `account_metrics` | `VITE_NOCODB_ACCOUNT_METRICS_TABLE_ID` |
@@ -224,7 +224,7 @@ ContentHub/
 
 ### RSS 采集接口
 
-仓库内缺少既有后端的采集配置定义。当前适配以 NocoDB 单条配置记录为联调约定，需填写实际 Table ID 和现有记录主键。前端用既有 `xc-token` 读取与更新该行，切换频率只写数值字段 `interval_hours`，允许值为 0、1、3、6、12、24。后端调度读取该字段，手动采集通过既有 n8n 基础路径向 `POST /rss-sync-now` 发送空 JSON 对象。工作流采集完成后在同一行写入带时区的 `last_synced_at`。Mock 只模拟配置和完成时间，真实接口需联调验证。
+采集配置使用 NocoDB 的 `sync_settings` 表中的单条记录。需填写实际 Table ID 和现有记录主键。前端用既有 `xc-token` 读取与更新该行，切换频率只写数值字段 `sync_interval_hours`，允许值为 0、1、3、6、12、24。后端调度读取该字段，手动采集通过既有 n8n 基础路径向 `POST /rss-sync-now` 发送空 JSON 对象。工作流采集完成后在同一行写入带时区的 `last_synced_at`。Mock 只模拟配置和完成时间，真实接口需联调验证。
 
 ### 受理、完成与重试
 

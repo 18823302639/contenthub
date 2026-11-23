@@ -6,7 +6,7 @@ import './rssSync.css'
 
 export function RssSyncControls({ model }: { model: ReturnType<typeof useRssSync> }) {
   const intervalId = useId()
-  const hours = model.pendingInterval ?? model.settings?.interval_hours
+  const hours = model.pendingInterval ?? model.settings?.sync_interval_hours
   const lastSynced = model.settings?.last_synced_at
   const lastSyncDate = lastSynced ? new Date(lastSynced.replace(' ', 'T')) : null
   const formattedTime = lastSyncDate && Number.isFinite(lastSyncDate.getTime())

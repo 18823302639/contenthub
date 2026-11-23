@@ -134,10 +134,10 @@ const optionalProductionFields = ['raw_content', 'fact_check', 'draft_md', 'fina
 
 const decode: Decoders = {
   rss_sync_settings: (row, id) => {
-    const hours = readNumber(row, 'interval_hours')
+    const hours = readNumber(row, 'sync_interval_hours')
     return {
       id,
-      interval_hours: rssSyncIntervals.find(option => option === hours) ?? null,
+      sync_interval_hours: rssSyncIntervals.find(option => option === hours) ?? null,
       last_synced_at: readDate(row, 'last_synced_at') || null,
     }
   },

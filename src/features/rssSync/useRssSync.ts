@@ -41,7 +41,7 @@ export function useRssSync(api: ContentHubApi, page: '/topics' | '/sources' | nu
   }, [page, refreshSettings])
 
   async function changeInterval(hours: RssSyncInterval) {
-    if (!settings || saving.current || hours === settings.interval_hours) return
+    if (!settings || saving.current || hours === settings.sync_interval_hours) return
     saving.current = true
     readVersion.current++
     setReading(false)
@@ -51,7 +51,7 @@ export function useRssSync(api: ContentHubApi, page: '/topics' | '/sources' | nu
       const saved = await api.setRssSyncInterval(hours)
       setSettings(saved)
       setReadError(null)
-      setFrequencyNotice(saved.interval_hours === hours ? { text: '采集频率已更新' }
+      setFrequencyNotice(saved.sync_interval_hours === hours ? { text: '采集频率已更新' }
         : { text: '采集频率保存结果未确认，回读值与所选值不一致。请刷新核对。', error: true })
     } catch (error) {
       setFrequencyNotice({ text: '采集频率保存结果未确认，请刷新核对。' + detail(error), error: true })

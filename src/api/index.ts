@@ -49,7 +49,7 @@ export function createContentHubApi(env: ContentHubEnv, fetcher: typeof fetch = 
     },
     async setRssSyncInterval(hours) {
       if (!rssSyncIntervals.includes(hours)) throw new Error('请选择支持的采集频率。')
-      return store.update('rss_sync_settings', rssSyncSettingsId(), { interval_hours: hours })
+      return store.update('rss_sync_settings', rssSyncSettingsId(), { sync_interval_hours: hours })
     },
     createRssSource: source => store.create('rss_sources', source),
     setRssSourceActive: (id, active) => store.update('rss_sources', id, { is_active: active }),

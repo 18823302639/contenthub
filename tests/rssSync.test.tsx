@@ -7,7 +7,7 @@ import type { RssSyncSettings, WebhookReceipt } from '../src/api'
 import type { RssSource } from '../src/types/schema'
 import { ContentHubApp } from '../src/app/ContentHubApp'
 
-const initial: RssSyncSettings = { id: 1, interval_hours: 6, last_synced_at: '2026-11-22T09:20:00Z' }
+const initial: RssSyncSettings = { id: 1, sync_interval_hours: 6, last_synced_at: '2026-11-22T09:20:00Z' }
 
 function setup(path = '/topics') {
   const api = Object.assign(createContentHubApi({}), {
@@ -49,8 +49,8 @@ it('两个页面读取同一频率，暂停直接保存，并以本地时间格�
   fireEvent.change(field, { target: { value: '0' } })
   expect(frequency().disabled).toBe(true)
   expect(api.setRssSyncInterval).toHaveBeenCalledExactlyOnceWith(0)
-  api.getRssSyncSettings.mockResolvedValue({ ...initial, interval_hours: 0 })
-  await act(async () => finish({ ...initial, interval_hours: 0 }))
+  api.getRssSyncSettings.mockResolvedValue({ ...initial, sync_interval_hours: 0 })
+  await act(async () => finish({ ...initial, sync_interval_hours: 0 }))
   expect(screen.getByText('采集频率已更新')).toBeTruthy()
   expect(frequency().value).toBe('0')
 
