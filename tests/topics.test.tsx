@@ -68,11 +68,11 @@ describe('选题看板', () => {
     const api = createContentHubApi({})
     const items = await api.listProductionItems()
     vi.spyOn(api, 'listProductionItems').mockResolvedValue(items.map(item => item.id === 1
-      ? { ...item, track_tag: 'AI 新赛道', workflow_status: 'constructor', compliance_risk: '低风险' }
+      ? { ...item, track_tag: 'AI 新赛道', workflow_status: 'constructor', compliance_risk: '待核风险' }
       : item))
     openApp(api)
     const topic = within(await card(retail))
-    expect(topic.getByText('低风险').classList.contains('pill--neutral')).toBe(true)
+    expect(topic.getByText('待核风险').classList.contains('pill--neutral')).toBe(true)
     expect(topic.getByText('constructor').classList.contains('pill--neutral')).toBe(true)
     expect(topic.queryByRole('button', { name: '确认选题' })).toBeNull()
     expect(topic.queryByRole('button', { name: '放弃' })).toBeNull()
@@ -108,7 +108,7 @@ describe('选题看板', () => {
     choose('最低评分', '5')
     expect(screen.getByText('没有符合条件的选题')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: '清除筛选' }))
-    expect(screen.getAllByRole('article')).toHaveLength(5)
+    expect(screen.getAllByRole('article')).toHaveLength(7)
   })
 
   it('从改稿台返回时保留原来的组合筛选', async () => {

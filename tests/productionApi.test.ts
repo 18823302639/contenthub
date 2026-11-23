@@ -1,0 +1,74 @@
+import { describe, expect, it, vi } from 'vitest'
+import { createContentHubApi } from '../src/api'
+
+const env = {
+  VITE_USE_MOCK: 'false',
+  VITE_WEBHOOK_SECRET: 'test-only-workflow',
+  VITE_NOCODB_API_URL: '/nocodb',
+  VITE_NOCODB_TOKEN: 'test-only-noco',
+  VITE_NOCODB_PRODUCTION_POOL_TABLE_ID: 'mtestproduction',
+}
+
+describe('WF2 和 WF3', () => {
+  it('使用独立端点、认证及 record_id 并保持 WF2 默认路径', async () => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async () => new Response(null, { status: 200 }))
+    await createContentHubApi(env, fetcher).triggerGenerateDraft(9)
+    const configured = createContentHubApi({
+      ...env, VITE_WF2_GENERATE_WEBHOOK_URL: '/internal/generate',
+      VITE_WF3_RENDER_WEBHOOK_URL: '/internal/render',
+    }, fetcher)
+    await configured.triggerGenerateDraft(9)
+    await configured.triggerRender(9)
+    expect(fetcher.mock.calls.map(([url]) => url)).toEqual([
+      'https://n8n.xuanhub.xyz/webhook/generate-draft', '/internal/generate', '/internal/render',
+    ])
+    for (const [, init] of fetcher.mock.calls) {
+      expect(init).toMatchObject({ method: 'POST', body: '{"record_id":9}', redirect: 'error' })
+      expect(new Headers(init?.headers).get('X-Hub-Token')).toBe('test-only-workflow')
+      expect(new Headers(init?.headers).get('Content-Type')).toBe('application/json')
+    }
+  })
+
+  it('在 WF3 未配置或 WF2 缺密钥时不发送请求，认证拒绝给出提示', async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(new Response(null, { status: 403 }))
+    const api = createContentHubApi(env, fetcher)
+    await expect(api.triggerRender(9)).rejects.toThrow('WF3 渲染服务尚未配置，请先完成 Day 3 广州渲染节点接入')
+    await expect(createContentHubApi({ ...env, VITE_WEBHOOK_SECRET: '' }, fetcher).triggerGenerateDraft(9))
+      .rejects.toThrow('VITE_WEBHOOK_SECRET')
+    expect(fetcher).not.toHaveBeenCalled()
+    await expect(api.triggerGenerateDraft(9)).rejects.toThrow(/鉴权失败.*403/)
+    expect(fetcher).toHaveBeenCalledTimes(1)
+  })
+
+  it('解码完整字段，并向 NocoDB 以 JSON 对象更新渲染数据', async () => {
+    const data = { scenes: [{ source: '原始样本' }], cards: [] }
+    const report = { status: 'pass', banned_word_hits: [], prediction_phrase_hits: [], missing_sources: [], suggestion: '' }
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({
+        id: 9, track_tag: 'main_overseas', workflow_status: '待人工审核', compliance_risk: '低风险',
+        remotion_data: JSON.stringify(data), compliance_report: JSON.stringify(report),
+        fact_check_notes: '校验完成', video_script: '口播正文', final_content: '定稿全文',
+      }))
+      .mockResolvedValueOnce(Response.json([{ id: 9 }]))
+      .mockResolvedValueOnce(Response.json({ id: 9, remotion_data: data }))
+    const api = createContentHubApi(env, fetcher)
+    await expect(api.getProductionItem(9)).resolves.toMatchObject({
+      track_tag: 'main_overseas', workflow_status: '待人工审核', compliance_risk: '低风险',
+      compliance_report: report, remotion_data: data, fact_check_notes: '校验完成', video_script: '口播正文', final_content: '定稿全文',
+    })
+    await api.updateProductionItem(9, { remotion_data: data })
+    expect(fetcher.mock.calls[1][1]?.body).toBe(JSON.stringify([{ remotion_data: data, id: 9 }]))
+  })
+})
+
+describe('Remotion 兼容性', () => {
+  it('区别空、语法错误、缺来源和可提交的对象', async () => {
+    const { parseRemotion } = await import('../src/features/productionDesk/remotion')
+    expect(parseRemotion('')).toMatchObject({ value: null, error: null, missingSources: [] })
+    expect(parseRemotion('{"scenes":')).toMatchObject({ value: null, error: expect.any(String) })
+    expect(parseRemotion('{"scenes":[{"source":" "}],"cards":[null,{"source":"原始数据"}]}'))
+      .toMatchObject({ error: null, missingSources: ['scenes[0].source', 'cards[0].source'] })
+    expect(parseRemotion('{"scenes":[{"source":"原始数据"}],"cards":[]}'))
+      .toMatchObject({ error: null, missingSources: [] })
+  })
+})

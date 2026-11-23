@@ -89,7 +89,7 @@ export function ContentHubApp({ api }: { api: ContentHubApi }) {
         <main className="workspace-content" id="content-start" tabIndex={-1}>
           <Routes>
             <Route index element={<Navigate to="/topics" replace />} />
-            <Route path="/topics" element={<TopicsPage board={board} rssSync={rssSync} />} />
+            <Route path="/topics" element={<TopicsPage api={api} board={board} writes={writes} rssSync={rssSync} />} />
             <Route path="/workbench" element={<Placeholder title="改稿台" text="从选题看板选择一条选题进入改稿台。" />} />
             <Route path="/workbench/:id" element={(
               <WorkbenchPage api={api} writes={writes} sessions={workbenchSessions.current}

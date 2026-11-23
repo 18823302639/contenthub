@@ -1,5 +1,5 @@
-import { complianceRisks, demandTypes, platforms, poolTypes, productionTracks, rssSyncIntervals, workflowStatuses } from '../types/schema'
-import type { AccountMetric, ProductionItem } from '../types/schema'
+import { complianceRisks, demandTypes, platforms, poolTypes, productionRiskLabels, productionTracks, rssSyncIntervals, workflowStatuses } from '../types/schema'
+import type { AccountMetric, ComplianceReport, JsonObject, ProductionItem } from '../types/schema'
 import { isCalendarDay } from '../utils/metricDays'
 import type { TableName, Tables } from './contracts'
 
@@ -130,7 +130,34 @@ function readMetrics(row: Row, id: number): AccountMetric {
   }
 }
 
-const optionalProductionFields = ['raw_content', 'fact_check', 'draft_md', 'final_md', 'revision_note'] as const
+function readJsonObject(value: unknown): JsonObject | null {
+  let parsed: unknown = value
+  if (typeof value === 'string') {
+    try { parsed = JSON.parse(value) } catch { return null }
+  }
+  return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as JsonObject : null
+}
+
+function readComplianceReport(value: unknown): ComplianceReport | null {
+  const report = readJsonObject(value)
+  if (!report || Object.keys(report).length === 0) return null
+  const fields = {
+    status: readText(report, 'status'),
+    banned_word_hits: readTitles(report.banned_word_hits),
+    prediction_phrase_hits: readTitles(report.prediction_phrase_hits),
+    missing_sources: readTitles(report.missing_sources),
+    suggestion: readText(report, 'suggestion'),
+  }
+  return Object.values(fields).some(value => typeof value === 'string' ? value.trim() : value.length) ? fields : null
+}
+
+function readRemotionData(value: unknown): JsonObject | string | null {
+  return readJsonObject(value) ?? (value == null ? null : typeof value === 'string' ? value : JSON.stringify(value))
+}
+
+const optionalProductionFields = [
+  'raw_content', 'fact_check', 'draft_md', 'final_md', 'final_content', 'revision_note', 'video_script', 'fact_check_notes',
+] as const
 
 const decode: Decoders = {
   rss_sync_settings: (row, id) => {
@@ -163,9 +190,11 @@ const decode: Decoders = {
       key_data_points: readText(row, 'key_data_points'),
       suggested_titles: readTitles(row.suggested_titles),
       score: readNumber(row, 'score', 1, 5),
-      compliance_risk: readChoice(row, 'compliance_risk', complianceRisks),
+      compliance_risk: readChoice(row, 'compliance_risk', [...complianceRisks, ...productionRiskLabels]),
       workflow_status: readChoice(row, 'workflow_status', workflowStatuses),
       ai_outline: readNullableText(row, 'ai_outline'),
+      compliance_report: readComplianceReport(row.compliance_report),
+      remotion_data: readRemotionData(row.remotion_data),
       is_benchmark: readCheckbox(row, 'is_benchmark'),
       published_at: readDate(row, 'published_at'),
       created_at: readDate(row, 'created_at'),

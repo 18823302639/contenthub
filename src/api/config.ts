@@ -6,6 +6,8 @@ export interface ContentHubEnv {
   readonly VITE_NOCODB_TOKEN?: string
   readonly VITE_N8N_WEBHOOK_BASE_URL?: string
   readonly VITE_WEBHOOK_SECRET?: string
+  readonly VITE_WF2_GENERATE_WEBHOOK_URL?: string
+  readonly VITE_WF3_RENDER_WEBHOOK_URL?: string
   readonly VITE_NOCODB_RSS_SOURCES_TABLE_ID?: string
   readonly VITE_NOCODB_RSS_SYNC_SETTINGS_TABLE_ID?: string
   readonly VITE_NOCODB_RSS_SYNC_SETTINGS_RECORD_ID?: string
@@ -15,6 +17,9 @@ export interface ContentHubEnv {
   readonly VITE_NOCODB_POST_METRICS_TABLE_ID?: string
   readonly VITE_NOCODB_ID_FIELD?: string
 }
+
+export const defaultWf2Url = 'https://n8n.xuanhub.xyz/webhook/generate-draft'
+export const wf3NotConfigured = 'WF3 渲染服务尚未配置，请先完成 Day 3 广州渲染节点接入'
 
 const tableKeys = {
   rss_sources: 'VITE_NOCODB_RSS_SOURCES_TABLE_ID',
@@ -53,7 +58,7 @@ export function readRssSyncSettingsId(env: ContentHubEnv): number {
 
 export function readBaseUrl(value: string | undefined, key: keyof ContentHubEnv): string {
   const base = value?.trim().replace(/\/+$/, '')
-  if (base && !/[?#\\]/.test(base)) {
+  if (base && !/[\s?#\\]/.test(base)) {
     if (base.startsWith('/') && !base.startsWith('//')) return base
     if (/^https?:\/\//i.test(base)) {
       try {

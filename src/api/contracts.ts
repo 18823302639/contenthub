@@ -1,9 +1,10 @@
-import type { AccountMetric, Platform, PoolType, PostMetric, ProductionItem, RadarItem, RssSource, RssSyncInterval, RssSyncSettings, WorkflowStatus } from '../types/schema'
+import type { AccountMetric, JsonObject, Platform, PoolType, PostMetric, ProductionItem, RadarItem, RssSource, RssSyncInterval, RssSyncSettings, WorkflowStatus } from '../types/schema'
 
 export interface ProductionFilters {
   trackTag?: string
   minScore?: number
   status?: string
+  risk?: string
 }
 
 export interface RadarFilters {
@@ -16,8 +17,9 @@ export type NewAccountMetric = {
   [Field in Exclude<keyof AccountMetric, 'id'>]: Field extends 'platform' ? Platform : NonNullable<AccountMetric[Field]>
 }
 export type ProductionUpdate = Partial<Pick<ProductionItem,
-  'raw_content' | 'fact_check' | 'draft_md' | 'final_md' | 'revision_note' | 'published_at' | 'is_benchmark'
-> & { workflow_status: WorkflowStatus }>
+  'zh_title' | 'raw_content' | 'fact_check' | 'draft_md' | 'final_md' | 'final_content' | 'video_script' |
+  'revision_note' | 'published_at' | 'is_benchmark' | 'compliance_risk'
+> & { workflow_status: WorkflowStatus; remotion_data: JsonObject | null }>
 
 export type VideoFormat = '16x9' | '9x16'
 export type VideoVoice =
@@ -47,6 +49,7 @@ export interface WebhookReceipt {
 
 export interface ContentHubApi {
   readonly mode: 'mock' | 'real'
+  readonly wf3Configured: boolean
   listProductionItems(filters?: ProductionFilters): Promise<ProductionItem[]>
   getProductionItem(id: number): Promise<ProductionItem>
   updateProductionItem(id: number, changes: ProductionUpdate): Promise<ProductionItem>
@@ -61,6 +64,8 @@ export interface ContentHubApi {
   listPostMetrics(): Promise<PostMetric[]>
   createAccountMetric(metric: NewAccountMetric): Promise<AccountMetric>
   triggerWebhook(...request: WebhookRequest): Promise<WebhookReceipt>
+  triggerGenerateDraft(recordId: number): Promise<WebhookReceipt>
+  triggerRender(recordId: number): Promise<WebhookReceipt>
   probeVideoDownload(downloadUrl: string, signal: AbortSignal): Promise<boolean>
 }
 

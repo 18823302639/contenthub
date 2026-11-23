@@ -1,6 +1,6 @@
 import { rssSyncIntervals } from '../types/schema'
 import type { ContentHubEnv } from './config'
-import { readMode, readRssSyncSettingsId } from './config'
+import { readMode, readRssSyncSettingsId, wf3NotConfigured } from './config'
 import type { ContentHubApi, WebhookRequest } from './contracts'
 import { createMockBackend } from './mockApi'
 import { createNocodbClient } from './nocodbClient'
@@ -17,7 +17,8 @@ export type {
 export { matchesProductionFilters } from './productionFilters'
 export { ApiHttpError } from './http'
 export { WriteReadbackError } from './nocodbClient'
-export { RssSyncAuthError } from './webhookClient'
+export { WebhookAuthError } from './webhookClient'
+export { wf3NotConfigured } from './config'
 
 function dateTime(value: string): number {
   return Date.parse(value.replace(' ', 'T'))
@@ -25,13 +26,15 @@ function dateTime(value: string): number {
 
 export function createContentHubApi(env: ContentHubEnv, fetcher: typeof fetch = globalThis.fetch): ContentHubApi {
   const mode = readMode(env)
-  const { store, triggerWebhook } = mode === 'mock'
+  const { store, triggerWebhook, triggerGenerateDraft, triggerRender } = mode === 'mock'
     ? createMockBackend()
-    : { store: createNocodbClient(env, fetcher), triggerWebhook: createWebhookClient(env, fetcher) }
+    : { store: createNocodbClient(env, fetcher), ...createWebhookClient(env, fetcher) }
+  const wf3Configured = Boolean(env.VITE_WF3_RENDER_WEBHOOK_URL?.trim())
   const rssSyncSettingsId = () => mode === 'mock' ? 1 : readRssSyncSettingsId(env)
 
   return {
     mode,
+    wf3Configured,
     async listProductionItems(filters = {}) {
       const rows = await store.list('production_pool')
       return rows.filter(row => matchesProductionFilters(row, filters))
@@ -73,6 +76,15 @@ export function createContentHubApi(env: ContentHubEnv, fetcher: typeof fetch = 
     async triggerWebhook(...request: WebhookRequest) {
       if (request[0] !== 'rss-sync-now') requireRecordId(request[1].production_id)
       return triggerWebhook(...request)
+    },
+    async triggerGenerateDraft(recordId) {
+      requireRecordId(recordId)
+      return triggerGenerateDraft(recordId)
+    },
+    async triggerRender(recordId) {
+      requireRecordId(recordId)
+      if (!wf3Configured) throw new Error(wf3NotConfigured)
+      return triggerRender(recordId)
     },
     async probeVideoDownload(downloadUrl, signal) {
       if (mode === 'mock') return false

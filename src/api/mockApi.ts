@@ -24,7 +24,9 @@ export function createMockBackend() {
 
   function updateProduction(item: ProductionItem, changes: Partial<ProductionItem>) {
     const index = data.production_pool.indexOf(item)
-    data.production_pool[index] = { ...item, ...changes }
+    const updated = { ...item, ...changes }
+    data.production_pool[index] = updated
+    return updated
   }
 
   const store: RecordStore = {
@@ -125,5 +127,35 @@ export function createMockBackend() {
     return { accepted: true, status: 202 }
   }
 
-  return { store, triggerWebhook }
+  async function triggerGenerateDraft(id: number): Promise<WebhookReceipt> {
+    await delay()
+    const item = find('production_pool', id)
+    if (activeJobs.has(id)) throw new Error('这条选题已有模拟任务正在运行。')
+    activeJobs.add(id)
+    const generating = updateProduction(item, { workflow_status: '生成中' })
+    setTimeout(() => {
+      activeJobs.delete(id)
+      if (!data.production_pool.includes(generating)) return
+      const mainTrack = item.track_tag === 'main_overseas'
+      updateProduction(generating, {
+        workflow_status: '待人工审核',
+        raw_content: item.raw_content || '【模拟原文】' + item.key_data_points,
+        ai_outline: item.ai_outline || '## 提纲\n\n1. 说明样本\n2. 对照数据\n3. 核对来源',
+        draft_md: `# ${item.zh_title}\n\n${item.key_data_points}\n\n【模拟】对照数据后列出限制条件。`,
+        video_script: mainTrack ? '【模拟口播】这组样本说明了什么？我们先来看原始数据。' : '',
+        remotion_data: mainTrack ? { scenes: [{ source: item.url, text: item.zh_title }], cards: [] } : null,
+        compliance_report: { status: 'pass', banned_word_hits: [], prediction_phrase_hits: [], missing_sources: [], suggestion: '复核样本口径。' },
+        compliance_risk: '低风险',
+      })
+    }, workflowDelayMs)
+    return { accepted: true, status: 200 }
+  }
+
+  async function triggerRender(id: number): Promise<WebhookReceipt> {
+    await delay()
+    find('production_pool', id)
+    return { accepted: true, status: 202 }
+  }
+
+  return { store, triggerWebhook, triggerGenerateDraft, triggerRender }
 }

@@ -8,9 +8,10 @@ export async function pollWorkflow<T>(
   read: () => Promise<T>,
   observe: (value: T) => boolean,
   started = Date.now(),
+  timing?: { interval: number; duration: number },
 ): Promise<boolean> {
-  const interval = mode === 'mock' ? 420 : 4_000
-  const duration = mode === 'mock' ? 4_200 : 90_000
+  const interval = timing?.interval ?? (mode === 'mock' ? 420 : 4_000)
+  const duration = timing?.duration ?? (mode === 'mock' ? 4_200 : 90_000)
   const deadline = started + duration
   const now = Date.now()
   if (now >= deadline || !active()) return false

@@ -39,30 +39,11 @@ docker stop contenthub
 
 ### 容器环境变量
 
-`VITE_*` 在构建时进入浏览器可见的产物。此 Dockerfile 固定构建 Mock，运行时的 `docker run -e` 无法切换已编译的 SPA。`.dockerignore` 排除本地环境文件、凭据、依赖、Git 和构建产物，源码 ZIP 中保留的 `.env.example` 仅供本地开发参考。真实 NocoDB 和 n8n 联调另行配置受保护的同源代理及访问控制。不要把真实令牌放入构建参数、镜像或浏览器包，也不要公开暴露未保护的 Webhook。 [Vite 构建期变量说明](https://vite.dev/guide/env-and-mode)
+`VITE_*` 在构建时进入浏览器可见的产物。Dockerfile 默认构建 Mock。真实模式通过构建参数显式启用，运行时的 `docker run -e` 无法切换已编译的 SPA。`.dockerignore` 排除本地环境文件、凭据、依赖、Git 和构建产物，源码 ZIP 中保留的 `.env.example` 仅供本地开发参考。真实 NocoDB 和 n8n 联调另行配置受保护的同源代理及访问控制。不要把真实令牌放入构建参数、镜像或浏览器包，也不要公开暴露未保护的 Webhook。 [Vite 构建期变量说明](https://vite.dev/guide/env-and-mode)
 
-#### 真实模式 Docker 构建片段
+#### Docker Compose 构建
 
-仓库的 Dockerfile 仍默认构建 Mock。若已有真实模式构建，在 Node 构建阶段、`RUN npm run build` 之前使用以下片段，替换原来的 `ENV VITE_USE_MOCK=true`。保留部署中已有的 NocoDB 和 n8n 构建变量。
-
-```dockerfile
-ARG VITE_USE_MOCK=true
-ARG VITE_WEBHOOK_SECRET=
-ENV VITE_USE_MOCK=${VITE_USE_MOCK} \
-    VITE_WEBHOOK_SECRET=${VITE_WEBHOOK_SECRET}
-```
-
-在 `docker-compose.yml` 中合并到前端服务的 `build.args`，由部署环境显式选择真实模式。
-
-```yaml
-services:
-  contenthub:
-    build:
-      context: .
-      args:
-        VITE_USE_MOCK: "${VITE_USE_MOCK:-true}"
-        VITE_WEBHOOK_SECRET: "${VITE_WEBHOOK_SECRET:-}"
-```
+运行 `docker compose up --build` 以启动默认 Mock。Compose 从部署环境读取 `build.args`，包括 `VITE_WF2_GENERATE_WEBHOOK_URL` 和 `VITE_WF3_RENDER_WEBHOOK_URL`。已有真实模式构建可传 `VITE_USE_MOCK=false` 并配置 NocoDB 表 ID、基础路径和 Webhook。WF2 留空时使用默认 `generate-draft` 端点，WF3 留空时在提交处提示未配置。
 
 `VITE_WEBHOOK_SECRET` 会写入浏览器可读的 JavaScript，Docker 构建参数也可能留在构建记录中。公开部署可通过受保护的同源代理转发 `rss-sync-now`，令前端使用公开标记 `proxy-managed`。代理校验登录和权限后覆盖 `X-Hub-Token`，真实密钥保留在代理端。 [Vite 环境变量](https://vite.dev/guide/env-and-mode#env-variables) [Docker 构建变量](https://docs.docker.com/build/building/variables/)
 
@@ -99,6 +80,14 @@ npm run preview -- --host 127.0.0.1
 - 「进入改稿台」打开 `#/workbench/:id`。在改稿台点击「返回选题看板」时，会恢复进入前的筛选。
 
 选题看板和信源管理顶部共用 RSS 采集控件。「立即采集」在 Webhook 受理后刷新当前列表并保留筛选，采集流程仍会在后台执行。「自动采集频率」选中即保存，0 表示暂停。上次采集时间按浏览器本地时区显示，可通过页面刷新按钮重新读取。
+
+## 生产池精修工作台
+
+- 通过「全部」「主赛道」「副赛道」分池，可同时使用流程状态、合规风险和评分筛选。旧赛道保留原确认和改稿流程。顶部采集控件和筛选共用同一份现有列表状态。
+- 新赛道的「生成初稿」调用 WF2。已有初稿时点击「重新生成」需确认。受理后每 5 秒读取该记录，最多等待 180 秒，回写到「待人工审核」后更新列表。旧审核状态不会单独触发重生成成功提示。
+- 「打开工作台」从 NocoDB 读取完整记录。顶部展示合规命中和修改建议，可切换正文、主赛道口播／Remotion JSON 和原始信源。关闭有未保存内容的工作台会提示确认。
+- NocoDB PATCH 使用 JSON 对象写入 `remotion_data`。无法解析的 JSON 会阻止保存。非空的 `scenes`、`cards` 条目缺少 `source` 时会定位提示并阻止渲染。人工定稿在一次更新中写入 `draft_md`、`final_md`、`final_content` 和「已定稿」，只有主动勾选才将风险降为「低风险」。
+- WF3 只面向主赛道。应先保存修改后的渲染数据，提交前前端会重新读取 NocoDB 记录核对风险和渲染数据。成功提示表示 Webhook 已受理，渲染完成由后端确认。
 
 ## 改稿台用法
 
@@ -216,7 +205,7 @@ ContentHub/
 | 雷达机会 | `listRadarItems({ minCommercialScore, minInfoGapScore })`，两个下限均为含等号 |
 | 运营数据 | `listAccountMetrics(since?)`、`createAccountMetric(metric)`，`since` 为含该时间点的下界 |
 | 帖子指标，只读 | `listPostMetrics()`，读取与运营数据同名的字段 |
-| AI 动作 | `triggerWebhook(action, payload)` |
+| AI 动作 | `triggerWebhook(action, payload)`、`triggerGenerateDraft(recordId)`、`triggerRender(recordId)` |
 
 列表由 API 层取得各页记录后统一筛选。运营指标中的 CTR 和完读率使用百分数，`25` 表示 25%，收入使用元。时间字段建议提供带时区的 ISO 8601 字符串。标记发布时应在同一次更新提交 `workflow_status: '已发布'` 和 `published_at`。
 
@@ -246,6 +235,10 @@ ContentHub/
 - n8n 以 `VITE_N8N_WEBHOOK_BASE_URL` 为基础地址，JSON body 通过 POST 发往 `${VITE_N8N_WEBHOOK_BASE_URL}/${action}`。初稿和改稿的 2xx 回执表示请求受理，完成结果通过 NocoDB 回读。视频工作流在 2xx JSON 回执中返回 `{ jobId, downloadUrl }`。`jobId` 为非空字符串，`downloadUrl` 由后端签发，单视频有效期 24 小时。缺少合法 HTTP(S) 下载链接时，改稿台仍显示有效任务 ID。 [n8n Webhook](https://docs.n8n.io/integrations/builtin/core-nodes/n8n-nodes-base.webhook/)
 
 真实部署待实测项目包括 PostgreSQL 外部表在 NocoDB 中暴露的字段名和类型、主键和创建时间默认值、标题 JSON 与日期的实际序列化、单条写入回执及分页上限，以及已激活的 n8n 工作流对 payload 的解析、鉴权和写回状态。接口测试使用合成响应，未连接真实 NocoDB、n8n 和渲染机。
+
+### WF2 和 WF3 Webhook
+
+WF2 默认使用 `https://n8n.xuanhub.xyz/webhook/generate-draft`，可通过 `VITE_WF2_GENERATE_WEBHOOK_URL` 覆盖。WF3 通过 `VITE_WF3_RENDER_WEBHOOK_URL` 配置。两者都发送 `POST` JSON `{ "record_id": 记录主键 }`，仅在各自需要认证的端点使用 `VITE_WEBHOOK_SECRET` 对应的 `X-Hub-Token`。真实服务联调需确认端点可访问，跨源服务允许应用来源和此请求头。
 
 ### RSS 采集接口
 

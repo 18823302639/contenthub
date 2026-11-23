@@ -201,14 +201,14 @@ describe('NocoDB v2 与真实模式', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     try {
       const value = {
-        ...production, Id: '7', score: '4', compliance_risk: '低风险',
+        ...production, Id: '7', score: '4', compliance_risk: '待核风险',
         workflow_status: '自动初审', track_tag: '新赛道', key_data_points: null,
         fact_check: ['错误类型'], final_md: null, created_at: null,
       }
       const api = createContentHubApi(env, vi.fn<typeof fetch>().mockResolvedValueOnce(Response.json(value)))
       const row = await api.getProductionItem(7)
       expect(row).toMatchObject({
-        id: 7, score: 4, compliance_risk: '低风险', workflow_status: '自动初审',
+        id: 7, score: 4, compliance_risk: '待核风险', workflow_status: '自动初审',
         track_tag: '新赛道', key_data_points: '', created_at: '', published_at: '',
       })
       expect(row).toMatchObject({ fact_check: '', final_md: '' })

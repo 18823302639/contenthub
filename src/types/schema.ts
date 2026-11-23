@@ -1,13 +1,22 @@
 export const poolTypes = ['production', 'radar'] as const
 export type PoolType = (typeof poolTypes)[number]
 
-export const productionTracks = ['商业数据', '汽车家电评测'] as const
+export const wf2Tracks = ['main_overseas', 'sub_toutiao'] as const
+export const productionTracks = ['商业数据', '汽车家电评测', ...wf2Tracks] as const
+
+export const productionRiskLabels = ['低风险', '中风险', '高风险'] as const
+export function productionRiskLabel(value: string) {
+  return productionRiskLabels.find(label => label === value.trim() || label[0] === value.trim())
+}
 
 export const complianceRisks = ['低', '中', '高'] as const
 export type ComplianceRisk = (typeof complianceRisks)[number]
 
 export const workflowStatuses = [
   '待筛选',
+  '生成中',
+  '待人工审核',
+  '已定稿',
   '已确认-待核对',
   'AI初稿完成',
   '需AI润色',
@@ -46,6 +55,17 @@ export interface RssSource {
   created_at: string
 }
 
+export type JsonValue = null | boolean | number | string | JsonValue[] | JsonObject
+export interface JsonObject { [key: string]: JsonValue }
+
+export interface ComplianceReport {
+  status: string
+  banned_word_hits: string[]
+  prediction_phrase_hits: string[]
+  missing_sources: string[]
+  suggestion: string
+}
+
 export interface ProductionItem {
   id: number
   source_name: string
@@ -66,6 +86,11 @@ export interface ProductionItem {
   fact_check?: string
   draft_md?: string
   final_md?: string
+  final_content?: string
+  video_script?: string
+  remotion_data?: JsonObject | string | null
+  compliance_report?: ComplianceReport | null
+  fact_check_notes?: string
   revision_note?: string
   /** 未发布时为空字符串。 */
   published_at: string

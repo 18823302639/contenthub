@@ -176,7 +176,8 @@ export function useWorkbench(
   const pending = record?.workflow_status === rewriteStatus || record?.workflow_status === '已确认-待核对'
   const terminal = record?.workflow_status === '已发布' || record?.workflow_status === '已放弃'
   const canChangeStatus = record !== undefined && isWorkflowStatus(record.workflow_status) && !terminal
-  const blocked = operation !== null || needsRead || pending || watching || writes.lockedIds.has(id)
+  const blocked = operation !== null || needsRead || pending || watching ||
+    record?.workflow_status === '生成中' || writes.lockedIds.has(id)
   const canSave = Boolean(doc?.markdown.trim()) && !blocked && (dirty || !record?.final_md?.trim())
   const canPublish = Boolean(record?.final_md?.trim()) && !dirty && !blocked && canChangeStatus
   const canRewrite = Boolean(doc?.markdown.trim()) && !dirty && !blocked && canChangeStatus
