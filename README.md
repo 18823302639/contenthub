@@ -41,6 +41,31 @@ docker stop contenthub
 
 `VITE_*` 在构建时进入浏览器可见的产物。此 Dockerfile 固定构建 Mock，运行时的 `docker run -e` 无法切换已编译的 SPA。`.dockerignore` 排除本地环境文件、凭据、依赖、Git 和构建产物，源码 ZIP 中保留的 `.env.example` 仅供本地开发参考。真实 NocoDB 和 n8n 联调另行配置受保护的同源代理及访问控制。不要把真实令牌放入构建参数、镜像或浏览器包，也不要公开暴露未保护的 Webhook。 [Vite 构建期变量说明](https://vite.dev/guide/env-and-mode)
 
+#### 真实模式 Docker 构建片段
+
+仓库的 Dockerfile 仍默认构建 Mock。若已有真实模式构建，在 Node 构建阶段、`RUN npm run build` 之前使用以下片段，替换原来的 `ENV VITE_USE_MOCK=true`。保留部署中已有的 NocoDB 和 n8n 构建变量。
+
+```dockerfile
+ARG VITE_USE_MOCK=true
+ARG VITE_WEBHOOK_SECRET=
+ENV VITE_USE_MOCK=${VITE_USE_MOCK} \
+    VITE_WEBHOOK_SECRET=${VITE_WEBHOOK_SECRET}
+```
+
+在 `docker-compose.yml` 中合并到前端服务的 `build.args`，由部署环境显式选择真实模式。
+
+```yaml
+services:
+  contenthub:
+    build:
+      context: .
+      args:
+        VITE_USE_MOCK: "${VITE_USE_MOCK:-true}"
+        VITE_WEBHOOK_SECRET: "${VITE_WEBHOOK_SECRET:-}"
+```
+
+`VITE_WEBHOOK_SECRET` 会写入浏览器可读的 JavaScript，Docker 构建参数也可能留在构建记录中。公开部署可通过受保护的同源代理转发 `rss-sync-now`，令前端使用公开标记 `proxy-managed`。代理校验登录和权限后覆盖 `X-Hub-Token`，真实密钥保留在代理端。 [Vite 环境变量](https://vite.dev/guide/env-and-mode#env-variables) [Docker 构建变量](https://docs.docker.com/build/building/variables/)
+
 ## 初始化与启动
 
 要求 Node.js 22.13+（22 系列）或 24+，以及 npm。源码包包含锁文件。
@@ -224,7 +249,7 @@ ContentHub/
 
 ### RSS 采集接口
 
-采集配置使用 NocoDB 的 `sync_settings` 表中的单条记录。需填写实际 Table ID 和现有记录主键。前端用既有 `xc-token` 读取与更新该行，切换频率只写数值字段 `sync_interval_hours`，允许值为 0、1、3、6、12、24。后端调度读取该字段，手动采集通过既有 n8n 基础路径向 `POST /rss-sync-now` 发送空 JSON 对象。工作流采集完成后在同一行写入带时区的 `last_synced_at`。Mock 只模拟配置和完成时间，真实接口需联调验证。
+采集配置使用 NocoDB 的 `sync_settings` 表中的单条记录。需填写实际 Table ID 和现有记录主键。前端用既有 `xc-token` 读取与更新该行，切换频率只写数值字段 `sync_interval_hours`，允许值为 0、1、3、6、12、24。后端调度读取该字段，手动采集通过既有 n8n 基础路径向 `POST /rss-sync-now` 发送空 JSON 对象，真实模式只为该操作携带 `X-Hub-Token`，取值来自 `VITE_WEBHOOK_SECRET`。缺少配置或收到 HTTP 401/403 时，页面会提示采集鉴权失败。跨域部署时，代理或 n8n 需允许 ContentHub 的来源及请求头 `X-Hub-Token`。工作流采集完成后在同一行写入带时区的 `last_synced_at`。Mock 只模拟配置和完成时间，真实接口需联调验证。
 
 ### 受理、完成与重试
 

@@ -17,6 +17,7 @@ export type {
 export { matchesProductionFilters } from './productionFilters'
 export { ApiHttpError } from './http'
 export { WriteReadbackError } from './nocodbClient'
+export { RssSyncAuthError } from './webhookClient'
 
 function dateTime(value: string): number {
   return Date.parse(value.replace(' ', 'T'))

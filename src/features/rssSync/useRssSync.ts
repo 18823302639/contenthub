@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { RssSyncAuthError } from '../../api'
 import type { ContentHubApi, RssSyncInterval, RssSyncSettings } from '../../api'
 
 type Notice = { text: string; error?: boolean }
@@ -72,7 +73,9 @@ export function useRssSync(api: ContentHubApi, page: '/topics' | '/sources' | nu
       setAcceptedCount(count => count + 1)
       void refreshSettings()
     } catch (error) {
-      setSyncNotice({ text: '采集触发结果未确认，请先核对执行记录。' + detail(error), error: true })
+      const text = error instanceof RssSyncAuthError ? error.message
+        : '采集触发结果未确认，请先核对执行记录。' + detail(error)
+      setSyncNotice({ text, error: true })
     } finally {
       submitting.current = false
       setSyncing(false)

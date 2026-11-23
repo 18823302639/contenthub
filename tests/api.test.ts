@@ -429,6 +429,7 @@ describe('RSS 采集配置', () => {
     ...env,
     VITE_NOCODB_RSS_SYNC_SETTINGS_TABLE_ID: 'mtestsync1',
     VITE_NOCODB_RSS_SYNC_SETTINGS_RECORD_ID: '7',
+    VITE_WEBHOOK_SECRET: 'test-only-rss-header',
   }
   const configUrl = 'https://nocodb.example.invalid/api/v2/tables/mtestsync1/records'
 
@@ -451,9 +452,12 @@ describe('RSS 采集配置', () => {
     const patch = fetcher.mock.calls[1][1]
     expect(JSON.parse(String(patch?.body))).toEqual([{ Id: 7, sync_interval_hours: 0 }])
     expect(new Headers(patch?.headers).get('xc-token')).toBe('test-only')
+    expect(new Headers(patch?.headers).get('X-Hub-Token')).toBeNull()
     const webhook = fetcher.mock.calls[3][1]
     expect(JSON.parse(String(webhook?.body))).toEqual({})
     expect(new Headers(webhook?.headers).get('xc-token')).toBeNull()
+    expect(new Headers(webhook?.headers).get('X-Hub-Token')).toBe('test-only-rss-header')
+    expect(webhook?.redirect).toBe('error')
   })
 
   it('配置记录 ID 缺失时不发写入，未知频率和无日期保留为空值', async () => {
@@ -502,7 +506,7 @@ describe('n8n Webhook', () => {
     const fetcher = vi.fn<typeof fetch>()
       .mockResolvedValueOnce(new Response('queued', { status: 202 }))
       .mockResolvedValueOnce(new Response(null, { status: 204 }))
-    const api = createContentHubApi(env, fetcher)
+    const api = createContentHubApi({ ...env, VITE_WEBHOOK_SECRET: 'test-only-rss-header' }, fetcher)
     const draft = { production_id: 7 }
     const rewrite = { production_id: 7, revision_note: '复核样本量' }
     expect(await api.triggerWebhook('fetch-and-draft', draft)).toEqual({ accepted: true, status: 202 })
@@ -513,6 +517,7 @@ describe('n8n Webhook', () => {
       expect(options).toMatchObject({ method: 'POST', body: JSON.stringify(payload) })
       expect(new Headers(options?.headers).get('content-type')).toBe('application/json')
       expect(new Headers(options?.headers).get('xc-token')).toBeNull()
+      expect(new Headers(options?.headers).get('X-Hub-Token')).toBeNull()
     }
   })
 

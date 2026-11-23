@@ -5,6 +5,7 @@ export interface ContentHubEnv {
   readonly VITE_NOCODB_API_URL?: string
   readonly VITE_NOCODB_TOKEN?: string
   readonly VITE_N8N_WEBHOOK_BASE_URL?: string
+  readonly VITE_WEBHOOK_SECRET?: string
   readonly VITE_NOCODB_RSS_SOURCES_TABLE_ID?: string
   readonly VITE_NOCODB_RSS_SYNC_SETTINGS_TABLE_ID?: string
   readonly VITE_NOCODB_RSS_SYNC_SETTINGS_RECORD_ID?: string
