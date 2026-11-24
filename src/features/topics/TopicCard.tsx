@@ -85,7 +85,7 @@ export function TopicCard({ item, activity, writeBusy, onConfirm, onRetry, onGen
       </div>
       {activity && <TopicFeedback activity={activity} />}
       <div className="topic-actions">
-        {wf2 && !retryEmpty ? (
+        {wf2 && !retryEmpty && activity?.kind !== 'waiting' ? (
           <button type="button" className="button button--primary" disabled={blocked || generating || !canGenerateDraft(item)}
             aria-busy={generating} onClick={() => {
               if (!draftExists || window.confirm('重新生成可能覆盖当前初稿、口播稿和渲染数据。确定继续吗？')) void onGenerate(item)

@@ -5,7 +5,9 @@ import type { ProductionItem } from '../../types/schema'
 import './renderResults.css'
 
 type RenderPhase = 'idle' | 'rendering' | 'completed' | 'failed'
-type Tracker = { record: ProductionItem; previous: string | null | undefined }
+type Tracker = { record: ProductionItem; previous: string | null | undefined; jobId?: string }
+
+const renderReadTimeout = 8_000
 
 function phaseOf(value: string | undefined): RenderPhase {
   switch (value?.trim().toLowerCase()) {
@@ -21,8 +23,12 @@ function fingerprint(record: ProductionItem) {
 }
 
 function observe(current: Tracker, record: ProductionItem): Tracker {
-  if (current.previous === undefined) return { record, previous: undefined }
   const phase = phaseOf(record.render_status)
+  if (current.jobId) {
+    if (record.render_job_id !== current.jobId || (current.previous !== undefined && phase === 'idle')) return current
+    return { record, previous: undefined, jobId: current.jobId }
+  }
+  if (current.previous === undefined) return { record, previous: undefined }
   if (phase === 'rendering') return { record, previous: null }
   if ((phase === 'completed' || phase === 'failed') && current.previous !== fingerprint(record)) {
     return { record, previous: undefined }
@@ -46,40 +52,45 @@ export function useRenderResults(api: ContentHubApi, record: ProductionItem | un
   const [tracker, setTracker] = useState<Tracker | null>(() => record ? { record, previous: undefined } : null)
   const [reading, setReading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const live = useRef(true)
-  const busy = useRef(false)
-  const readVersion = useRef(0)
+  const activeRead = useRef<AbortController | null>(null)
   const id = record?.id
   const phase = tracker && (tracker.previous !== undefined ? 'rendering' : phaseOf(tracker.record.render_status))
 
-  useEffect(() => {
-    live.current = true
-    return () => { live.current = false }
+  useEffect(() => () => {
+    const read = activeRead.current
+    activeRead.current = null
+    read?.abort()
   }, [])
   useEffect(() => {
     if (record) setTracker(current => current ? observe(current, record) : { record, previous: undefined })
   }, [record])
 
   const refresh = useCallback(async () => {
-    if (!enabled || id === undefined || busy.current) return
-    busy.current = true
-    const version = ++readVersion.current
+    if (!enabled || id === undefined || activeRead.current) return
+    const read = new AbortController()
+    activeRead.current = read
     setReading(true)
     setError(null)
+    const cancelled = new Promise<never>((_resolve, reject) => {
+      read.signal.addEventListener('abort', () => reject(read.signal.reason), { once: true })
+    })
+    const timer = window.setTimeout(() => read.abort(), renderReadTimeout)
     try {
-      const latest = await api.getProductionItem(id)
+      const latest = await Promise.race([api.getProductionItem(id, read.signal), cancelled])
       if (latest.id !== id) throw new Error('返回记录与当前稿件不一致。')
-      if (live.current && readVersion.current === version) {
+      if (activeRead.current === read) {
         setTracker(current => current ? observe(current, latest) : { record: latest, previous: undefined })
       }
     } catch (cause) {
-      if (live.current && readVersion.current === version) {
-        setError('渲染状态读取失败，可重试。' + (cause instanceof Error ? cause.message : ''))
+      if (activeRead.current === read) {
+        setError(read.signal.aborted ? '渲染状态读取超时，可重试。' :
+          '渲染状态读取失败，可重试。' + (cause instanceof Error ? cause.message : ''))
       }
     } finally {
-      if (readVersion.current === version) {
-        busy.current = false
-        if (live.current) setReading(false)
+      window.clearTimeout(timer)
+      if (activeRead.current === read) {
+        activeRead.current = null
+        setReading(false)
       }
     }
   }, [api, id, enabled])
@@ -90,12 +101,14 @@ export function useRenderResults(api: ContentHubApi, record: ProductionItem | un
     return () => window.clearInterval(timer)
   }, [enabled, phase, refresh])
 
-  function accepted(baseline: ProductionItem) {
-    readVersion.current++
-    busy.current = false
+  function accepted(baseline: ProductionItem, jobId?: string) {
+    const read = activeRead.current
+    activeRead.current = null
+    read?.abort()
     setReading(false)
     setError(null)
-    setTracker({ record: baseline, previous: fingerprint(baseline) })
+    const trackedJobId = baseline.render_job_id === undefined ? undefined : jobId
+    setTracker({ record: baseline, previous: fingerprint(baseline), jobId: trackedJobId })
   }
 
   function confirmSubmission(latest: ProductionItem) {
@@ -104,14 +117,15 @@ export function useRenderResults(api: ContentHubApi, record: ProductionItem | un
   }
 
   const submitLabel = phase === 'rendering' || phase === 'failed' ? '重试 Remotion 渲染' : '提交 Remotion 渲染'
-  return { record: tracker?.record, phase: phase || 'idle', refresh, reading, error, accepted, confirmSubmission, submitLabel }
+  const jobId = tracker?.jobId ?? (tracker?.previous === undefined ? tracker?.record.render_job_id : undefined)
+  return { record: tracker?.record, jobId, phase: phase || 'idle', refresh, reading, error, accepted, confirmSubmission, submitLabel }
 }
 
 const states: Record<RenderPhase, string> = { idle: '未开始', rendering: '渲染中', completed: '已完成', failed: '失败' }
 
 export function RenderResults({ model }: { model: ReturnType<typeof useRenderResults> }) {
   const [copy, setCopy] = useState('')
-  const { phase, record, reading, refresh, error } = model
+  const { phase, record, jobId, reading, refresh, error } = model
   const video = phase === 'completed' ? mediaUrl(record?.video_url) : null
   const cardUrls = (record?.cards_urls ?? []).map(mediaUrl).filter((url): url is string => url !== null)
   const cards = phase === 'completed' ? [...new Set(cardUrls)] : []
@@ -124,6 +138,7 @@ export function RenderResults({ model }: { model: ReturnType<typeof useRenderRes
         <RefreshCw size={14} aria-hidden />刷新渲染状态
       </button>
     </div>
+    {jobId && <p className="results-count">任务 ID <code>{jobId}</code></p>}
     {error && <p role="alert" className="topic-feedback topic-feedback--warning">{error}</p>}
     {phase === 'failed' && <p role="alert" className="topic-feedback topic-feedback--warning">
       {record?.render_error || '渲染失败，服务端未提供原因。'} 可以重新提交。

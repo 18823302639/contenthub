@@ -36,7 +36,7 @@ export function createContentHubApi(env: ContentHubEnv, fetcher: typeof fetch = 
       const rows = await store.list('production_pool', onTotalRows)
       return rows.filter(row => matchesProductionFilters(row, filters))
     },
-    getProductionItem: id => store.get('production_pool', id),
+    getProductionItem: (id, signal) => store.get('production_pool', id, signal),
     async deleteProductionItem(id) {
       requireRecordId(id)
       await store.remove('production_pool', id)

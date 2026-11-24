@@ -23,7 +23,7 @@ export function createNocodbClient(env: ContentHubEnv, fetcher: typeof fetch): R
     return `${base}/tables/${encodeURIComponent(id)}/records`
   }
 
-  async function send(url: string, method: 'GET' | 'POST' | 'PATCH' | 'DELETE', fields?: object) {
+  async function send(url: string, method: 'GET' | 'POST' | 'PATCH' | 'DELETE', fields?: object, signal?: AbortSignal) {
     const headers = new Headers({ Accept: 'application/json' })
     if (fields) headers.set('Content-Type', 'application/json')
 
@@ -32,6 +32,7 @@ export function createNocodbClient(env: ContentHubEnv, fetcher: typeof fetch): R
         method,
         headers,
         body: fields ? JSON.stringify([fields]) : undefined,
+        ...(signal ? { signal } : {}),
       })
     } catch (error) {
       if (isAuthFailure(error)) {
@@ -44,10 +45,11 @@ export function createNocodbClient(env: ContentHubEnv, fetcher: typeof fetch): R
   async function get<T extends TableName>(
     table: T,
     id: number,
+    signal?: AbortSignal,
     verifyCheckbox?: 'is_benchmark' | 'is_active',
   ): Promise<Tables[T]> {
     requireRecordId(id)
-    const response = await send(`${recordsUrl(table)}/${id}`, 'GET')
+    const response = await send(`${recordsUrl(table)}/${id}`, 'GET', undefined, signal)
     const value = asObject(await response.json())
     if (verifyCheckbox && parseCheckbox(value[verifyCheckbox]) === null) {
       throw new Error('NocoDB 回读缺少可识别的 ' + verifyCheckbox + ' 值。')
@@ -78,7 +80,7 @@ export function createNocodbClient(env: ContentHubEnv, fetcher: typeof fetch): R
 
       recordId = returnedId
       const checkbox = table === 'production_pool' ? 'is_benchmark' : table === 'rss_sources' ? 'is_active' : undefined
-      return await get(table, returnedId, checkbox && Object.hasOwn(fields, checkbox) ? checkbox : undefined)
+      return await get(table, returnedId, undefined, checkbox && Object.hasOwn(fields, checkbox) ? checkbox : undefined)
     } catch (cause) {
       throw new WriteReadbackError(table, recordId, cause)
     }

@@ -167,7 +167,7 @@ it('初始渲染中每十秒读记录，完成后呈现视频和静态图并停�
   await act(async () => vi.advanceTimersByTimeAsync(9999))
   expect(read).not.toHaveBeenCalled()
   await act(async () => vi.advanceTimersByTimeAsync(1))
-  expect(read).toHaveBeenCalledExactlyOnceWith(1)
+  expect(read).toHaveBeenCalledExactlyOnceWith(1, expect.any(AbortSignal))
   expect(screen.getByLabelText('成片预览').getAttribute('src')).toBe(video)
   expect(screen.getByRole('link', { name: '下载视频' }).getAttribute('href')).toBe(video)
   expect(screen.getByRole('img', { name: '静态数据图 1' }).getAttribute('src')).toBe(card)
@@ -343,4 +343,110 @@ it('重提渲染后旧的刷新请求不锁住新任务，也不展示旧成片'
   await act(async () => resolveOldRead({ ...pending, render_status: 'completed', video_url: '/old.mp4' }))
   expect(results.getByText('渲染状态 · 渲染中')).toBeTruthy()
   expect(results.queryByRole('link', { name: '下载视频' })).toBeNull()
+})
+
+it('改稿代理异常时保留未保存编辑，手动重试后只回填编辑器', async () => {
+  const fetcher = vi.fn<typeof fetch>()
+    .mockResolvedValueOnce(new Response(null, { status: 502 }))
+    .mockResolvedValueOnce(Response.json({ draft_md: '重试生成的正文' }))
+  const api = createContentHubApi({ VITE_USE_MOCK: 'false' }, fetcher)
+  vi.spyOn(api, 'listProductionItems').mockResolvedValue([row])
+  vi.spyOn(api, 'getProductionItem').mockResolvedValue(row)
+  const write = vi.spyOn(api, 'updateProductionItem')
+  mount(api, '/workbench?id=1')
+  const draft = await editor()
+  fireEvent.change(draft, { target: { value: '未保存的人工编辑' } })
+  const retry = screen.getByRole<HTMLButtonElement>('button', { name: 'AI 挑刺去味' })
+  fireEvent.click(retry)
+  await screen.findByText(/改稿结果未确认.*502.*执行记录/)
+  expect(retry.disabled).toBe(false)
+  expect(draft.value).toBe('未保存的人工编辑')
+  expect(fetcher).toHaveBeenCalledTimes(1)
+
+  fireEvent.click(retry)
+  await screen.findByText('AI 改稿已写入草稿，请人工核对')
+  expect(draft.value).toBe('重试生成的正文')
+  expect(write).not.toHaveBeenCalled()
+  expect(fetcher.mock.calls.map(([url, init]) => [url, init?.method, JSON.parse(String(init?.body))])).toEqual(
+    Array.from({ length: 2 }, () => ['/api/n8n/rewrite-draft', 'POST', {
+      production_id: 1, revision_note: '', draft_md: '未保存的人工编辑', video_script: row.video_script,
+    }]),
+  )
+})
+
+it('已受理新渲染任务时，新的查询也会忽略回传的旧任务成片', async () => {
+  const initial = { ...row, render_status: 'rendering', render_job_id: 'job-old' }
+  const api = fixture([initial])
+  const trigger = vi.spyOn(api, 'triggerRender').mockResolvedValue({ accepted: true, status: 202, jobId: 'job-new' })
+  const read = vi.mocked(api.getProductionItem)
+  vi.spyOn(window, 'confirm').mockReturnValue(true)
+  mount(api, '/workbench?id=1')
+  await editor()
+  fireEvent.click(screen.getByRole('button', { name: '重试 Remotion 渲染' }))
+  await screen.findByText('Remotion 渲染请求已受理')
+  const results = within(screen.getByRole('region', { name: '渲染状态与成片' }))
+  const refresh = results.getByRole('button', { name: '刷新渲染状态' })
+  read.mockResolvedValueOnce({ ...initial, render_status: 'completed', video_url: '/old.mp4' })
+  await act(async () => fireEvent.click(refresh))
+  expect(results.getByText('渲染状态 · 渲染中')).toBeTruthy()
+  expect(results.queryByRole('link', { name: '下载视频' })).toBeNull()
+
+  const complete = { ...initial, render_job_id: 'job-new', render_status: 'completed', video_url: '/new.mp4' }
+  read.mockResolvedValueOnce(complete)
+  await act(async () => fireEvent.click(refresh))
+  expect(results.getByRole('link', { name: '下载视频' }).getAttribute('href')).toBe('/new.mp4')
+  read.mockResolvedValueOnce({ ...initial, render_status: 'completed', video_url: '/late.mp4' })
+  await act(async () => fireEvent.click(refresh))
+  expect(results.getByRole('link', { name: '下载视频' }).getAttribute('href')).toBe('/new.mp4')
+  expect(trigger).toHaveBeenCalledExactlyOnceWith(1)
+})
+
+it('旧站回执返回任务 ID 但未暴露对应列，仍可按状态找到成片', async () => {
+  const api = fixture([{ ...row, render_status: '' }])
+  vi.spyOn(api, 'triggerRender').mockResolvedValue({ accepted: true, status: 202, jobId: 'legacy-receipt' })
+  mount(api, '/workbench?id=1')
+  await editor()
+  fireEvent.click(screen.getByRole('button', { name: '提交 Remotion 渲染' }))
+  await screen.findByText('Remotion 渲染请求已受理')
+  vi.mocked(api.getProductionItem).mockResolvedValueOnce({
+    ...row, render_status: 'completed', video_url: '/legacy.mp4',
+  })
+  fireEvent.click(screen.getByRole('button', { name: '刷新渲染状态' }))
+  expect((await screen.findByRole('link', { name: '下载视频' })).getAttribute('href')).toBe('/legacy.mp4')
+})
+
+it.each(['手动', '自动'])('读取渲染状态超时后恢复%s刷新，迟到结果不能取代新成片', async method => {
+  vi.useFakeTimers()
+  let finishStalledRead!: (response: Response) => void
+  const stalledRead = new Promise<Response>(resolve => { finishStalledRead = resolve })
+  const fetcher = vi.fn<typeof fetch>()
+    .mockReturnValueOnce(stalledRead)
+    .mockResolvedValueOnce(Response.json({ ...row, render_status: 'completed', video_url: '/current.mp4' }))
+  const api = createContentHubApi({
+    VITE_USE_MOCK: 'false', VITE_NOCODB_PRODUCTION_POOL_TABLE_ID: 'mtestrender',
+  }, fetcher)
+  const queued = { ...row, render_status: 'queued' }
+  function Panel() { return <RenderResults model={useRenderResults(api, queued, true)} /> }
+  render(<Panel />)
+  const refresh = screen.getByRole<HTMLButtonElement>('button', { name: '刷新渲染状态' })
+
+  fireEvent.click(refresh)
+  expect(refresh.disabled).toBe(true)
+  await act(async () => vi.advanceTimersByTimeAsync(7_999))
+  expect(refresh.disabled).toBe(true)
+  expect(screen.queryByRole('alert')).toBeNull()
+  await act(async () => vi.advanceTimersByTimeAsync(1))
+  expect(refresh.disabled).toBe(false)
+  expect(screen.getByRole('alert').textContent).toContain('渲染状态读取超时')
+  expect(fetcher.mock.calls[0][1]?.signal?.aborted).toBe(true)
+
+  if (method === '手动') await act(async () => fireEvent.click(refresh))
+  else await act(async () => vi.advanceTimersByTimeAsync(2000))
+  expect(screen.getByRole('link', { name: '下载视频' }).getAttribute('href')).toBe('/current.mp4')
+  await act(async () => finishStalledRead(Response.json({ ...row, render_status: 'completed', video_url: '/outdated.mp4' })))
+  expect(screen.getByRole('link', { name: '下载视频' }).getAttribute('href')).toBe('/current.mp4')
+  expect(fetcher.mock.calls.map(([url, options]) => [url, options?.method])).toEqual([
+    ['/api/nocodb/tables/mtestrender/records/1', 'GET'],
+    ['/api/nocodb/tables/mtestrender/records/1', 'GET'],
+  ])
 })

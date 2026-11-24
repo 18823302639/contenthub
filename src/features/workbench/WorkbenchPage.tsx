@@ -184,8 +184,8 @@ function Workbench({ api, id, writes, sessions, onWrite, refreshBoard, topicsPat
         throw new Error('记录已变更或不满足渲染条件，请刷新记录核对。')
       }
       if (!render.confirmSubmission(latest)) return
-      await api.triggerRender(id)
-      render.accepted(latest)
+      const receipt = await api.triggerRender(id)
+      render.accepted(latest, receipt.jobId)
       setRenderNotice({ text: 'Remotion 渲染请求已受理' })
     } catch (error) {
       setRenderNotice({ text: error instanceof Error ? error.message : '渲染请求未确认。', error: true })

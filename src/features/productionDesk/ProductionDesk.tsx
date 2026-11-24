@@ -186,8 +186,8 @@ function DeskEditor({ api, record: initial, writes, onSaved, requestClose, regis
         return
       }
       if (!render.confirmSubmission(latest)) return
-      await api.triggerRender(record.id)
-      render.accepted(latest)
+      const receipt = await api.triggerRender(record.id)
+      render.accepted(latest, receipt.jobId)
       setNotice({ text: 'Remotion 渲染请求已受理' })
     } catch (error) {
       setNotice({ text: message(error), error: true })

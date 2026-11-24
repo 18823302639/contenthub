@@ -52,7 +52,7 @@ export interface WebhookReceipt {
 export interface ContentHubApi {
   readonly mode: 'mock' | 'real'
   listProductionItems(filters?: ProductionFilters, onTotalRows?: (total: number) => void): Promise<ProductionItem[]>
-  getProductionItem(id: number): Promise<ProductionItem>
+  getProductionItem(id: number, signal?: AbortSignal): Promise<ProductionItem>
   deleteProductionItem(id: number): Promise<void>
   updateProductionItem(id: number, changes: ProductionUpdate): Promise<ProductionItem>
   listRssSources(poolType?: PoolType): Promise<RssSource[]>
@@ -85,7 +85,7 @@ export type TableName = keyof Tables
 
 export interface RecordStore {
   list<T extends TableName>(table: T, onTotalRows?: (total: number) => void): Promise<Tables[T][]>
-  get<T extends TableName>(table: T, id: number): Promise<Tables[T]>
+  get<T extends TableName>(table: T, id: number, signal?: AbortSignal): Promise<Tables[T]>
   remove(table: 'production_pool', id: number): Promise<void>
   create<T extends keyof NewRecords>(table: T, fields: NewRecords[T]): Promise<Tables[T]>
   update<T extends TableName>(table: T, id: number, changes: Partial<Omit<Tables[T], 'id'>>): Promise<Tables[T]>

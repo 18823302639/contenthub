@@ -10,6 +10,10 @@ export class WebhookAuthError extends Error {
   }
 }
 
+function readJobId(value: unknown): string | undefined {
+  return typeof value === 'string' ? value.trim() || undefined : undefined
+}
+
 function readSignedDownloadUrl(value: unknown): string | null {
   if (typeof value !== 'string' || !/^https:\/\/[^/?#]/i.test(value) || /[\s\u0000-\u001f\u007f\\]/u.test(value)) {
     return null
@@ -46,7 +50,8 @@ export function createWebhookClient(env: ContentHubEnv, fetcher: typeof fetch) {
       const receipt: WebhookReceipt = { accepted: true, status: response.status }
       if (action === 'generate-video') {
         const body: { jobId?: unknown; downloadUrl?: unknown } | null = await response.json().catch(() => null)
-        if (typeof body?.jobId === 'string' && body.jobId.trim()) receipt.jobId = body.jobId.trim()
+        const jobId = readJobId(body?.jobId)
+        if (jobId) receipt.jobId = jobId
         receipt.downloadUrl = readSignedDownloadUrl(body?.downloadUrl)
       }
       if (action === 'rewrite-draft') {
@@ -71,7 +76,9 @@ export function createWebhookClient(env: ContentHubEnv, fetcher: typeof fetch) {
       const url = readProxyPath(env.VITE_WF3_RENDER_WEBHOOK_URL?.trim() || defaultWf3Url, 'VITE_WF3_RENDER_WEBHOOK_URL')
       try {
         const response = await post(url, { record_id: recordId }, '渲染提交')
-        return { accepted: true, status: response.status }
+        const body: { jobId?: unknown } | null = await response.json().catch(() => null)
+        const jobId = readJobId(body?.jobId)
+        return { accepted: true, status: response.status, ...(jobId ? { jobId } : {}) }
       } catch (error) {
         if (url === defaultWf3Url && error instanceof ApiHttpError && error.status === 404) {
           throw new Error(wf3NotConfigured, { cause: error })

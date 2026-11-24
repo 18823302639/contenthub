@@ -98,6 +98,7 @@ export interface ProductionItem {
   updated_at?: string
   need_remotion?: boolean | null
   render_status?: string
+  render_job_id?: string | null
   video_url?: string
   cards_urls?: string[]
   render_error?: string

@@ -95,13 +95,6 @@ export function canAbandon(item: ProductionItem) {
   return isWorkflowStatus(item.workflow_status) && !['生成中', '已定稿', '已发布', '已放弃'].includes(item.workflow_status)
 }
 
-function draftOutput(item: ProductionItem) {
-  return JSON.stringify([
-    item.draft_md, item.video_script, item.remotion_data, item.fact_check_notes,
-    item.compliance_report, item.ai_outline, item.suggested_titles,
-  ])
-}
-
 function message(error: unknown): string {
   return error instanceof Error ? error.message : '请求失败。'
 }
@@ -110,13 +103,15 @@ function activityFor(item: ProductionItem, kind: ActivityKind, detail?: string):
   return { kind, title: item.zh_title, detail }
 }
 
+const draftReadbackStatuses = [confirmedStatus, 'AI初稿完成', '初稿已生成', '待人工审核']
+
 function initialDraftReady(item: ProductionItem) {
-  return Boolean(item.draft_md?.trim()) &&
-    [confirmedStatus, 'AI初稿完成', '初稿已生成', '待人工审核'].includes(item.workflow_status)
+  return draftReadbackStatuses.includes(item.workflow_status) && Boolean(item.draft_md?.trim())
 }
 
 function initialDraftPending(item: ProductionItem) {
-  return item.workflow_status === '生成中' || canRetryEmptyDraft(item)
+  return item.workflow_status === '生成中' ||
+    (draftReadbackStatuses.includes(item.workflow_status) && !item.draft_md?.trim())
 }
 
 function observeActivity(item: ProductionItem, activity?: TopicActivity): TopicActivity | undefined {
@@ -301,18 +296,18 @@ export function useTopicBoard(api: ContentHubApi, writes: RecordWrites) {
   }
 
   async function generateDraft(item: ProductionItem) {
-    if (busy.current.has(item.id) || !canGenerateDraft(item)) return
+    if (busy.current.has(item.id) || state.activities[item.id]?.kind === 'waiting' || !canGenerateDraft(item)) return
     const release = writes.acquire(item.id)
     if (!release) return
     busy.current.add(item.id)
     publish(item, 'wf2Starting')
 
     let generated = false
-    const previousOutput = draftOutput(item)
+    const previousDraft = item.draft_md?.trim()
+    let draftWasCleared = false
     try {
       await api.triggerGenerateDraft(item.id)
       publish(item, 'wf2Generating')
-      let seenGenerating = false
       generated = await pollWorkflow(api.mode, () => mounted.current, async () => {
         try {
           return await api.getProductionItem(item.id)
@@ -321,14 +316,14 @@ export function useTopicBoard(api: ContentHubApi, writes: RecordWrites) {
         }
       }, latest => {
         if (!latest) return false
+        const draft = latest.draft_md?.trim()
+        if (!draft && (latest.workflow_status === '生成中' || latest.workflow_status === '待人工审核')) draftWasCleared = true
         if (latest.workflow_status === '生成中') {
-          seenGenerating = true
           publish(latest, 'wf2Generating', { replaceItem: true })
           return false
         }
-        if (latest.workflow_status !== '待人工审核') return false
-        // 重新生成时，旧的审核状态不足以确认新稿已写入。
-        if (!seenGenerating && item.workflow_status === '待人工审核' && draftOutput(latest) === previousOutput) return false
+        // 审核状态可能先于正文更新。
+        if (latest.workflow_status !== '待人工审核' || !draft || (!draftWasCleared && draft === previousDraft)) return false
         publish(latest, 'wf2Ready', { replaceItem: true })
         return true
       }, Date.now(), { interval: 5_000, duration: 180_000 })

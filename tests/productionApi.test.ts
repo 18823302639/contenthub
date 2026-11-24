@@ -115,3 +115,19 @@ it('NocoDB 优先报告跨页全库总数并解码 WF4 字段，不改同源读�
   expect(items[1]).toMatchObject({ need_remotion: true, render_error: '模拟失败' })
   expect(fetcher.mock.calls[1][0]).toBe('/api/nocodb/tables/mtest/records?offset=1&limit=100&sort=id')
 })
+
+it('WF4 读取可选任务 ID，保留空回执并解码 NocoDB 的任务字段', async () => {
+  const fetcher = vi.fn<typeof fetch>()
+    .mockResolvedValueOnce(Response.json({ jobId: ' wf4-run-21 ' }, { status: 202 }))
+    .mockResolvedValueOnce(new Response(null, { status: 204 }))
+    .mockResolvedValueOnce(Response.json({ id: 9, render_job_id: ' wf4-run-21 ', render_status: 'queued' }))
+    .mockResolvedValueOnce(Response.json({ id: 9, render_job_id: null }))
+  const api = createContentHubApi(env, fetcher)
+  await expect(api.triggerRender(9)).resolves.toEqual({ accepted: true, status: 202, jobId: 'wf4-run-21' })
+  await expect(api.triggerRender(9)).resolves.toEqual({ accepted: true, status: 204 })
+  await expect(api.getProductionItem(9)).resolves.toMatchObject({ id: 9, render_job_id: 'wf4-run-21', render_status: 'queued' })
+  await expect(api.getProductionItem(9)).resolves.toMatchObject({ id: 9, render_job_id: null })
+  expect(fetcher.mock.calls[0]).toEqual(['/api/n8n/render-video', expect.objectContaining({
+    method: 'POST', body: '{"record_id":9}',
+  })])
+})

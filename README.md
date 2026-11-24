@@ -85,7 +85,7 @@ npm run preview -- --host 127.0.0.1
 ## 生产池精修工作台
 
 - 通过「全部」「主赛道」「副赛道」分池，可同时使用流程状态、合规风险和评分筛选。旧赛道保留原确认和改稿流程。顶部采集控件和筛选共用同一份现有列表状态。
-- 新赛道的「生成初稿」调用 WF2。已有初稿时点击「重新生成」需确认。受理后每 5 秒读取该记录，最多等待 180 秒，回写到「待人工审核」后更新列表。旧审核状态不会单独触发重生成成功提示。
+- 新赛道的「生成初稿」调用 WF2。已有初稿时点击「重新生成」需确认。受理后每 5 秒读取该记录，最多等待 180 秒。读到「待人工审核」以及可确认的新正文后更新列表。监测期间正文一直与旧稿相同时，前端无法确认该稿来自本次任务。
 - 「打开工作台」从 NocoDB 读取完整记录。顶部展示合规命中和修改建议，可切换正文、主赛道口播／Remotion JSON 和原始信源。关闭有未保存内容的工作台会提示确认。
 - `remotion_data` 可留空，由 WF4 按正文生成分镜。手动填写时，只有 JSON 语法错误会触发数据格式门禁。提供 `scenes` 或 `cards` 时，界面会提示缺失的 `source` 或年份。可在来源文本中注明年份，或填写 `source_year`、`year`。人工定稿在一次更新中写入 `draft_md`、`final_md`、`final_content` 和「已定稿」，只有主动勾选才将风险降为「低风险」。
 - Remotion 面向主赛道及明确启用视频的适用记录。副赛道和 `need_remotion=false` 不提供提交入口。WF4 受理后每 10 秒读取本条 NocoDB 记录直至完成或失败，也可手动刷新。完成且有可用地址后，可预览、下载及复制视频链接。跨域对象是否直接保存由响应的 `Content-Disposition` 控制。
@@ -266,11 +266,23 @@ ContentHub/
 
 状态写入和 Webhook 受理是两次独立请求。先确认写入结果，再触发对应 Webhook。写入已返回成功但回执或回读异常时，API 抛出 `WriteReadbackError`，优先按可用主键查询记录。Webhook 超时、断网或响应有歧义时，先查记录和 n8n 执行历史，确认未启动后再触发。真实工作流若需要允许安全重试，应先约定执行标识与去重规则。 [n8n Webhook 响应模式](https://docs.n8n.io/integrations/builtin/core-nodes/n8n-nodes-base.webhook/#respond)
 
+### WF2 联调与入口迁移
+
+新赛道卡片的常规生成走 `generate-draft`，发送 `{ record_id }`。旧确认流程和空稿重试走 `fetch-and-draft`，发送 `{ production_id }`。统一入口前，使用专用测试选题逐一核对两条路径的 n8n 执行记录及正文回写。记录请求路径、HTTP 状态、选题 ID、执行 ID 和最终的 `draft_md`、`workflow_status`，省略凭据与完整稿件。
+
 ### WF3 挑刺改稿和 WF4 渲染回写
 
-- 新入口 `POST /api/n8n/rewrite-draft` 发送 `{ production_id, revision_note, draft_md, video_script }`。返回 JSON 可为 `{ draft_md, video_script }` 或一项此对象的数组，至少提供一项非空文稿。该入口以回传编辑稿为契约。只返回受理消息时，保留当前编辑并提示核对回执。此前只发送 ID 和修改意见的工作流继续走等待回写路径。
-- `POST /api/n8n/render-video` 发送 `{ record_id }`。现有 `VITE_WF3_RENDER_WEBHOOK_URL` 是该端点的历史覆盖变量名。WF4 写入 `production_pool.render_status`（`queued`、`rendering`、`completed` 或 `failed`）、`video_url`、可选 `cards_urls` 数组以及 `render_error`。推荐受理后先写排队状态并清理旧结果，新的任务结果应具有可区分的链接或错误。成片地址支持 HTTPS 或站内根路径。
+- 新入口 `POST /api/n8n/rewrite-draft` 发送 `{ production_id, revision_note, draft_md, video_script }`。返回 JSON 可为 `{ draft_md, video_script }` 或一项此对象的数组，至少提供一项非空文稿。该入口以回传编辑稿为契约。只返回受理消息时，保留当前编辑并提示核对回执。收到 HTTP 5xx 时提示改稿结果待确认，可查执行记录后手动重试。此前只发送 ID 和修改意见的工作流继续走等待回写路径。
+- `POST /api/n8n/render-video` 发送 `{ record_id }`。现有 `VITE_WF3_RENDER_WEBHOOK_URL` 是该端点的历史覆盖变量名。WF4 写入 `production_pool.render_status`（`queued`、`rendering`、`completed` 或 `failed`）、`video_url`、可选 `cards_urls` 数组以及 `render_error`。启用任务关联时，提交前读取的 NocoDB 记录须暴露 `render_job_id`（初值可为 `null`）。WF4 给每次提交分配唯一 ID，先在数据库保存该 ID、`queued` 并清理旧结果，再下发任务，受理回执返回 `{ jobId }`。前端按回执 ID 关联后续读取，缺少字段或回执 ID 时按现有状态读取。
+
+  回调需由服务端以选题 ID、当前 `render_job_id` 和进行中状态原子校验后更新。仅在匹配时写入终态和成片地址。迟到回调和重复完成回调应无写入效果。在测试环境用同一条记录提交两次，先回传旧任务完成，再回传新任务完成，确认数据库和下载入口只采用新任务结果。成片地址支持 HTTPS 或站内根路径。
 - 队列从 `production_pool.updated_at` 排序，也兼容 `UpdatedAt`，旧记录用 `created_at`。视频是否适用读取 `track_tag` 和可选 `need_remotion`。
+
+### WF4 离线回调预检
+
+- `node scripts/wf4-callback-preflight.mjs trace < workflow-graph.json` 读取脱敏的 `nodes`（仅 `name`、`type`）与 `connections`，列出「解析渲染回调数据」的直接上游、输入输出端口和可到达的入口。静态连线提供候选分支，具体执行来源仍需对照该次运行的上游节点。
+- `node scripts/wf4-callback-preflight.mjs check < callback-fixture.json` 读取 `{ items, records }`。构造单条回调项，载荷可放在 `json.body`、`body` 或根层。按约定提供正整数 `record_id`（也接受十进制数字字符串）、`jobId`、`completed` 或 `failed` 状态。记录快照只需 `id`、`render_job_id` 和 `render_status`。
+- 预检只计算符合写回条件的记录数。记录或任务不匹配、任务已结束、输入多条或标识缺失时为 0，退出码为 1。JSON 无法读取、连线格式无效或模式未知时退出码为 2。工具不执行节点代码、不发请求，也不写数据库。使用合成数据或脱敏快照，省略凭据、请求头、签名链接及业务正文。
 
 ### 联调权限边界
 

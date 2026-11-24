@@ -68,6 +68,8 @@ it('WF2 按 5 秒读回，重新生成时不会把旧审核记录认作完成', 
   const trigger = vi.spyOn(api, 'triggerGenerateDraft').mockResolvedValue({ accepted: true, status: 200 })
   const read = vi.spyOn(api, 'getProductionItem').mockResolvedValueOnce(main)
     .mockResolvedValueOnce({ ...main, workflow_status: '生成中' })
+    .mockResolvedValueOnce(main)
+    .mockResolvedValueOnce({ ...main, draft_md: '  ' })
     .mockResolvedValue({ ...main, draft_md: '# 新稿' })
   const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true)
   vi.useFakeTimers()
@@ -84,10 +86,12 @@ it('WF2 按 5 秒读回，重新生成时不会把旧审核记录认作完成', 
   await act(async () => vi.advanceTimersByTimeAsync(1))
   expect(read).toHaveBeenCalledExactlyOnceWith(1)
   expect(screen.queryByText('初稿已生成，可进入工作台审核')).toBeNull()
-  await act(async () => vi.advanceTimersByTimeAsync(10_000))
+  await act(async () => vi.advanceTimersByTimeAsync(15_000))
+  expect(screen.queryByText('初稿已生成，可进入工作台审核')).toBeNull()
+  await act(async () => vi.advanceTimersByTimeAsync(5_000))
   expect(screen.getByText('初稿已生成，可进入工作台审核')).toBeTruthy()
   await act(async () => vi.advanceTimersByTimeAsync(180_000))
-  expect(read).toHaveBeenCalledTimes(3)
+  expect(read).toHaveBeenCalledTimes(5)
 })
 
 it('工作台读取详情，校验 JSON 和来源，再把草稿写入两个定稿字段', async () => {

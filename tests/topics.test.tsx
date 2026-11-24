@@ -325,3 +325,26 @@ it('已确认且没有正文的卡片直接重试，不重写确认状态', asyn
   await item.findByText('初稿已回写。', {}, { timeout: 3000 })
   expect(item.queryByRole('button', { name: '重试生成初稿' })).toBeNull()
 })
+
+it('空稿重试先读到完成状态，正文未回写时继续等下一次读取', async () => {
+  const api = { ...createContentHubApi({}), mode: 'real' as const }
+  const rows = await api.listProductionItems()
+  const pending = { ...rows[0], workflow_status: '已确认-待核对', draft_md: '' }
+  vi.spyOn(api, 'listProductionItems').mockResolvedValue([pending])
+  const read = vi.spyOn(api, 'getProductionItem')
+    .mockResolvedValueOnce({ ...pending, workflow_status: 'AI初稿完成' })
+    .mockResolvedValue({ ...pending, workflow_status: 'AI初稿完成', draft_md: '新初稿' })
+  const trigger = vi.spyOn(api, 'triggerWebhook').mockResolvedValue({ accepted: true, status: 202 })
+  vi.useFakeTimers()
+  openApp(api)
+  await act(async () => {})
+  const item = within(screen.getByRole('article', { name: retail }))
+  await act(async () => fireEvent.click(item.getByRole('button', { name: '重试生成初稿' })))
+  await act(async () => vi.advanceTimersByTimeAsync(4000))
+  expect(item.getByText('Webhook 已受理，等待初稿回写。')).toBeTruthy()
+  expect(item.queryByText('初稿已回写。')).toBeNull()
+  await act(async () => vi.advanceTimersByTimeAsync(4000))
+  expect(item.getByText('初稿已回写。')).toBeTruthy()
+  expect(trigger).toHaveBeenCalledExactlyOnceWith('fetch-and-draft', { production_id: 1 })
+  expect(read).toHaveBeenCalledTimes(2)
+})
