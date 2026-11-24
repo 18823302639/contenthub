@@ -104,7 +104,7 @@ def check_rendering(page, base, workflow, media_file, touch):
 
     workflow.failed_reads = 1
     read_status()
-    expect(panel.get_by_role("alert")).to_contain_text("渲染状态读取失败，可重试")
+    expect(panel.get_by_role("alert")).to_contain_text(re.compile("渲染状态读取失败.*刷新状态"))
     workflow.row.update(render_status="completed", video_url="/media/retired.mp4", render_error="")
     read_status()
     expect(panel.get_by_text("qa-current", exact=True)).to_be_visible()
