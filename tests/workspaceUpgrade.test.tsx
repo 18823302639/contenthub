@@ -547,3 +547,70 @@ it.each(['javascript:alert(1)', 'https://example.invalid/play.mp4'])('独立下�
   expect(screen.queryByRole('link', { name: '下载视频' })).toBeNull()
   expect(screen.getByRole('link', { name: '打开视频' }).getAttribute('href')).toBe(record.video_url)
 })
+
+const signedFixture =
+  'https://fixture.00000000000000000000000000000000.r2.cloudflarestorage.com/fixture.mp4' +
+  '?response-content-disposition=attachment%3B%20filename%3Dfixture.mp4' +
+  '&X-Amz-Algorithm=AWS4-HMAC-SHA256' +
+  '&X-Amz-Credential=FIXTURE%2F20260603%2Fauto%2Fs3%2Faws4_request' +
+  '&X-Amz-Date=20260603T122500Z&X-Amz-Expires=60' +
+  '&X-Amz-Signature=' + 'a'.repeat(64) +
+  '&X-Amz-SignedHeaders=host&x-id=GetObject'
+
+function showCompletedVideo(video_url: string, video_download_url?: string, video_download_expires_at?: string) {
+  vi.useFakeTimers()
+  vi.setSystemTime(new Date('2026-06-03T12:25:15Z'))
+  const record = { ...row, render_status: 'completed', video_url, video_download_url, video_download_expires_at }
+  const api = fixture([record])
+  function Panel() { return <RenderResults model={useRenderResults(api, record, true)} /> }
+  render(<Panel />)
+  return api
+}
+
+it('在有效期内原样下载 R2 旧字段的附件，保留当前页与过期后的播放入口', async () => {
+  const api = showCompletedVideo(signedFixture)
+  const save = screen.getByRole('link', { name: '下载视频' })
+  expect(save.getAttribute('href')).toBe(signedFixture)
+  const target = save.getAttribute('target')
+  expect(target).toBeTruthy()
+  expect(target).not.toBe('_blank')
+  const frame = Array.from(document.querySelectorAll('iframe')).find(item => item.name === target)
+  expect(frame?.getAttribute('sandbox')).toBe('allow-downloads')
+  expect(save.getAttribute('referrerpolicy')).toBe('no-referrer')
+  expect(save.hasAttribute('download')).toBe(false)
+
+  await act(async () => vi.advanceTimersByTimeAsync(45_000))
+  expect(screen.queryByRole('link', { name: '下载视频' })).toBeNull()
+  expect(screen.getByText(/下载链接已过期/)).toBeTruthy()
+  expect(screen.getByRole('link', { name: '打开视频' }).getAttribute('href')).toBe(signedFixture)
+  expect(api.getProductionItem).not.toHaveBeenCalled()
+})
+
+it('优先独立附件，独立链接过期后仍可下载有效的 R2 旧字段', async () => {
+  const explicit = 'https://cdn.example.invalid/attachment.mp4?fixture=keep%2Bexact'
+  showCompletedVideo(signedFixture, explicit, '2026-06-03T12:25:16Z')
+  expect(screen.getByRole('link', { name: '下载视频' }).getAttribute('href')).toBe(explicit)
+  await act(async () => vi.advanceTimersByTimeAsync(1000))
+  expect(screen.getByRole('link', { name: '下载视频' }).getAttribute('href')).toBe(signedFixture)
+})
+
+it.each([
+  ['其他域', signedFixture.replace('r2.cloudflarestorage.com', 'example.invalid')],
+  ['仿冒域', signedFixture.replace('r2.cloudflarestorage.com', 'r2.cloudflarestorage.com.example.invalid')],
+  ['非标准端口', signedFixture.replace('cloudflarestorage.com/', 'cloudflarestorage.com:8443/')],
+  ['明文协议', signedFixture.replace('https:', 'http:')],
+  ['普通播放', signedFixture.replace('disposition=attachment', 'disposition=inline')],
+  ['没有签名', signedFixture.replace(/&X-Amz-Signature=[a-f]+/, '')],
+  ['重复签名', signedFixture + '&X-Amz-Signature=' + 'b'.repeat(64)],
+  ['重复附件请求', signedFixture + '&response-content-disposition=inline'],
+  ['已过期', signedFixture.replace('X-Amz-Expires=60', 'X-Amz-Expires=10')],
+  ['未生效', signedFixture.replace('20260603T122500Z', '20260603T122530Z')],
+  ['无效签发日', signedFixture.replace('20260603T122500Z', '20260631T122500Z')],
+  ['非读取请求', signedFixture.replace('GetObject', 'PutObject')],
+])('旧字段的%s地址不提供下载入口', (_name, url) => {
+  showCompletedVideo(url)
+  expect(screen.queryByRole('link', { name: '下载视频' })).toBeNull()
+  if (url.startsWith('https:')) {
+    expect(screen.getByRole('link', { name: '打开视频' }).getAttribute('href')).toBe(url)
+  }
+})

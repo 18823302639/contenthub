@@ -276,7 +276,7 @@ ContentHub/
 - `POST /api/n8n/render-video` 发送 `{ record_id }`。现有 `VITE_WF3_RENDER_WEBHOOK_URL` 是该端点的历史覆盖变量名。WF4 写入 `production_pool.render_status`（`queued`、`rendering`、`completed` 或 `failed`）、`video_url`、可选 `cards_urls` 数组以及 `render_error`。启用任务关联时，提交前读取的 NocoDB 记录须暴露 `render_job_id`（初值可为 `null`）。WF4 给每次提交分配唯一 ID，先在数据库保存该 ID、`queued` 并清理旧结果，再下发任务，受理回执返回 `{ jobId }`。前端按回执 ID 关联后续读取，缺少字段或回执 ID 时按现有状态读取。
 
   回调需由服务端以选题 ID、当前 `render_job_id` 和进行中状态原子校验后更新。仅在匹配时写入终态和成片地址。迟到回调和重复完成回调应无写入效果。在测试环境用同一条记录提交两次，先回传旧任务完成，再回传新任务完成，确认数据库和下载入口只采用新任务结果。成片地址支持 HTTPS 或站内根路径。
-- 成片字段支持可选的 `video_download_url` 和 `video_download_expires_at`。`video_url` 继续用于播放。独立下载 URL 必须为不同的 HTTPS 链接或站内根路径。跨域下载响应须返回 `Content-Disposition: attachment`。WF4 在新任务开始时清空旧附件字段，与当前任务的成片结果一起回写新值。
+- 成片字段支持可选的 `video_download_url` 和 `video_download_expires_at`。`video_url` 继续用于播放。优先使用不同于播放地址的独立 HTTPS 下载链接或站内根路径。旧记录的 `video_url` 在官方 R2 HTTPS 签名请求明确要求附件且仍有效时也提供下载入口。浏览器使用原 URL 发起下载，跨域下载响应须返回 `Content-Disposition: attachment`。WF4 在新任务开始时清空旧附件字段，与当前任务的成片结果一起回写新值。
 - 下载期限可通过 ISO 8601 时间戳提供。SigV4 链接也可由前端读取 `X-Amz-Date` 和 `X-Amz-Expires`，两种期限同时存在时取较早者。到期后保持播放，支持刷新记录核对新链接。浏览器仅在点击时打开附件，保留签名原文。存储端提前撤销的情况由下载响应处理。
 - 队列从 `production_pool.updated_at` 排序，也兼容 `UpdatedAt`，旧记录用 `created_at`。视频是否适用读取 `track_tag` 和可选 `need_remotion`。
 
