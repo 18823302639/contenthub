@@ -4,23 +4,18 @@ import type { ContentHubApi, ProductionUpdate } from '../../api'
 import type { RecordWrites } from '../../app/useRecordWrites'
 import { productionRiskLabel } from '../../types/schema'
 import type { ProductionItem } from '../../types/schema'
-import { externalUrl } from '../../utils/externalUrl'
-import { MarkdownPreview, renderMarkdownHtml } from '../workbench/MarkdownPreview'
+import { renderMarkdownHtml } from '../workbench/MarkdownPreview'
 import { useUnsavedChanges } from '../../app/UnsavedChanges'
 import { requestAiDraft } from '../workbench/requestAiDraft'
 import { editorialWarnings, needsRemotion, renderDataIssue, renderRecordIsCurrent, reviewIssue } from './editingRules'
 import { RenderResults, useRenderResults } from './RenderResults'
+import { editorialTabs, Tabs } from '../workbench/EditorTabs'
+import type { EditorialTab } from '../workbench/EditorTabs'
 import { ComplianceBanner } from './ComplianceBanner'
+import { SourceReference } from './SourceReference'
 import { parseRemotion, remotionText, sameRemotion } from './remotion'
 import './productionDesk.css'
 
-const tabs = [
-  { id: 'article', label: '图文正文', video: false },
-  { id: 'script', label: '视频口播稿', video: true },
-  { id: 'remotion', label: 'Remotion 渲染数据', video: true },
-  { id: 'sources', label: '原始信源与大纲', video: false },
-] as const
-type TabId = (typeof tabs)[number]['id']
 type Operation = 'save' | 'finalize' | 'render' | 'rewrite'
 type Notice = { text: string; error?: boolean }
 
@@ -60,20 +55,6 @@ function matchesWrite(record: ProductionItem, patch: ProductionUpdate) {
   })
 }
 
-function SourceReference({ record }: { record: ProductionItem }) {
-  const url = externalUrl(record.url)
-  return (
-    <div className="desk-reference">
-      <div><h3>原文标题</h3><p>{record.raw_title || '暂无原文标题。'}</p>
-        {url && <a className="topic-origin" href={url} target="_blank" rel="noopener noreferrer">打开原文</a>}
-      </div>
-      <div><h3>核心数据点</h3><p>{record.key_data_points || '暂无核心数据点。'}</p></div>
-      <div><h3>AI 大纲</h3>{record.ai_outline?.trim() ? <MarkdownPreview text={record.ai_outline} /> : <p>暂无大纲。</p>}</div>
-      <div><h3>原始素材</h3><p>{record.raw_content || '暂无原始素材。'}</p></div>
-    </div>
-  )
-}
-
 function DeskEditor({ api, record: initial, writes, onSaved, requestClose, registerClose }: {
   api: ContentHubApi
   record: ProductionItem
@@ -85,7 +66,7 @@ function DeskEditor({ api, record: initial, writes, onSaved, requestClose, regis
   const group = useId()
   const [record, setRecord] = useState(initial)
   const [values, setValues] = useState(() => fields(initial))
-  const [tab, selectTab] = useState<TabId>('article')
+  const [tab, selectTab] = useState<EditorialTab>('article')
   const [reviewTicket, setReviewTicket] = useState<string | null>(null)
   const [reviewedFields, setReviewedFields] = useState<string | null>(null)
   const [revisionNote, setRevisionNote] = useState('')
@@ -93,9 +74,8 @@ function DeskEditor({ api, record: initial, writes, onSaved, requestClose, regis
   const [notice, setNotice] = useState<Notice | null>(null)
   const main = needsRemotion(record)
   const render = useRenderResults(api, record, main)
-  const enabledTabs = tabs.filter(option => !option.video || main)
   const parsed = parseRemotion(values.remotion)
-  const jsonIssue = main ? renderDataIssue(parsed) : null
+  const jsonIssue = renderDataIssue(parsed)
   const warnings = editorialWarnings(values)
   const fieldsKey = JSON.stringify(values)
   const markLow = fieldsKey === reviewTicket
@@ -110,15 +90,15 @@ function DeskEditor({ api, record: initial, writes, onSaved, requestClose, regis
     values.script !== original.script || remotionChanged
   const dirty = markLow || changed
   useUnsavedChanges(dirty)
-  const finalizeReason = approvalIssue || jsonIssue ||
+  const finalizeReason = approvalIssue || (main ? jsonIssue : null) ||
     (!values.title.trim() || !values.article.trim() ? '定稿需要中文标题和图文正文。' : null)
   const renderReason = approvalIssue || jsonIssue ||
     (productionRiskLabel(record.compliance_risk) === '高风险' ? '请先用人工复核操作保存低风险等级。' : null) ||
     (changed ? '请先保存当前草稿和渲染数据。' : null) ||
     (render.phase === 'rendering' ? '已在渲染，请等待本次结果。' : null)
-  const saveDisabled = busy || (main && Boolean(parsed.error))
+  const writeRemotion = main || remotionChanged
+  const saveDisabled = busy || (writeRemotion && Boolean(parsed.error))
   const seconds = Math.ceil(length(values.script) * 60 / 260)
-  const activeTab = enabledTabs.some(option => option.id === tab) ? tab : 'article'
   const finalizeReasonId = group + '-finalize-reason'
   const renderReasonId = group + '-render-reason'
 
@@ -147,7 +127,8 @@ function DeskEditor({ api, record: initial, writes, onSaved, requestClose, regis
     const release = writes.acquire(record.id)
     if (!release) return
     const patch: ProductionUpdate = { zh_title: values.title.trim(), draft_md: values.article }
-    if (main) Object.assign(patch, { video_script: values.script, remotion_data: parsed.value })
+    if (main || values.script !== original.script) patch.video_script = values.script
+    if (writeRemotion) patch.remotion_data = parsed.value
     if (finalize) Object.assign(patch, {
       final_md: values.article, final_content: values.article, workflow_status: '已定稿',
       ...(markLow ? { compliance_risk: '低风险' } : {}),
@@ -247,26 +228,9 @@ function DeskEditor({ api, record: initial, writes, onSaved, requestClose, regis
           )}
         </div>
 
-        <div className="desk-tabs" role="tablist" aria-label="精修内容" onKeyDown={event => {
-          const index = enabledTabs.findIndex(option => option.id === activeTab)
-          const step = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0
-          if (!step && event.key !== 'Home' && event.key !== 'End') return
-          event.preventDefault()
-          const next = step ? (index + step + enabledTabs.length) % enabledTabs.length : event.key === 'Home' ? 0 : enabledTabs.length - 1
-          selectTab(enabledTabs[next].id)
-          event.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')[next]?.focus()
-        }}>
-          {tabs.map(option => (
-            <button id={group + '-' + option.id} key={option.id} type="button" role="tab"
-              disabled={option.video && !main} title={option.video && !main ? '副赛道无需视频' : undefined}
-              className={main && option.id === 'script' ? 'desk-tab-featured' : undefined}
-              aria-selected={option.id === activeTab} aria-controls={group + '-panel'}
-              tabIndex={option.id === activeTab ? 0 : -1} onClick={() => selectTab(option.id)}>{option.label}</button>
-          ))}
-        </div>
-        {!main && <p className="desk-muted">{record.track_tag === 'sub_toutiao' ? '副赛道无需视频' : '当前赛道无需视频'}</p>}
-        <div className="desk-panel" role="tabpanel" id={group + '-panel'} aria-labelledby={group + '-' + activeTab}>
-          {activeTab === 'article' && (
+        <Tabs group={group} label="精修内容" className="desk-tabs" options={editorialTabs} value={tab} select={selectTab} />
+        <div className="desk-panel" role="tabpanel" id={group + '-panel'} aria-labelledby={group + '-' + tab}>
+          {tab === 'article' && (
             <>
               <div className="desk-editor-toolbar">
                 <label htmlFor={group + '-article-editor'}>图文正文</label><span>{length(values.article)} 字</span>
@@ -279,7 +243,7 @@ function DeskEditor({ api, record: initial, writes, onSaved, requestClose, regis
                 onChange={event => change('article', event.target.value)} />
             </>
           )}
-          {activeTab === 'script' && (
+          {tab === 'script' && (
             <>
               <div className="desk-editor-toolbar">
                 <label htmlFor={group + '-script-editor'}>口播脚本</label>
@@ -291,13 +255,14 @@ function DeskEditor({ api, record: initial, writes, onSaved, requestClose, regis
                 onChange={event => change('script', event.target.value)} />
             </>
           )}
-          {activeTab === 'remotion' && (
+          {tab === 'remotion' && (
             <>
               <div className="desk-editor-toolbar">
                 <label htmlFor={group + '-json-editor'}>Remotion JSON</label>
                 <button className="button button--secondary" type="button" disabled={busy || !parsed.value}
                   onClick={() => change('remotion', JSON.stringify(parsed.value, null, 2))}>格式化 JSON</button>
               </div>
+              {!main && <p className="desk-muted">当前选题未启用渲染，仍可编辑并保存数据。</p>}
               {jsonIssue && <p id={group + '-json-issues'} className="topic-feedback topic-feedback--warning" role="alert">
                 {jsonIssue}
               </p>}
@@ -307,7 +272,7 @@ function DeskEditor({ api, record: initial, writes, onSaved, requestClose, regis
                 onChange={event => change('remotion', event.target.value)} />
             </>
           )}
-          {activeTab === 'sources' && <SourceReference record={record} />}
+          {tab === 'sources' && <SourceReference record={record} />}
         </div>
         {main && <RenderResults model={render} />}
       </div>

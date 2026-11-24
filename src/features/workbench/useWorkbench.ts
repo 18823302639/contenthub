@@ -183,15 +183,16 @@ export function useWorkbench(
   const record = doc?.record
   const script = doc?.script ?? record?.video_script ?? ''
   const remotion = doc?.remotion ?? remotionText(record?.remotion_data)
+  const scriptChanged = script !== (record?.video_script ?? '')
+  const parsedRemotion = parseRemotion(remotion)
   const savedRemotion = remotionText(record?.remotion_data)
   const changedRemotion = remotion !== savedRemotion && (() => {
-    const edited = parseRemotion(remotion)
     const saved = parseRemotion(savedRemotion)
-    return Boolean(edited.error || saved.error) || !sameRemotion(edited.value, saved.value)
+    return Boolean(parsedRemotion.error || saved.error) || !sameRemotion(parsedRemotion.value, saved.value)
   })()
   const dirty = Boolean(doc && (
     (doc.markdown !== savedMarkdown(doc.record) && doc.markdown !== (doc.record.draft_md ?? '')) ||
-    script !== (record?.video_script ?? '') || changedRemotion
+    scriptChanged || changedRemotion
   ))
   const pending = record?.workflow_status === rewriteStatus || record?.workflow_status === '已确认-待核对'
   const terminal = record?.workflow_status === '已发布' || record?.workflow_status === '已放弃'
@@ -203,7 +204,11 @@ export function useWorkbench(
   const canRewrite = Boolean(doc?.markdown.trim()) && !dirty && !blocked && canChangeStatus
   const canToggleBenchmark = Boolean(record) && !blocked
   const canPolish = !blocked && canChangeStatus && Boolean(doc?.markdown.trim() || script.trim())
-  const canSaveDraft = !blocked && Boolean(doc?.markdown.trim())
+  const video = Boolean(record && needsRemotion(record))
+  const writeScript = video || scriptChanged
+  const writeRemotion = video || changedRemotion
+  const canSaveDraft = !blocked && Boolean(doc && (doc.markdown.trim() || scriptChanged || changedRemotion)) &&
+    !(writeRemotion && parsedRemotion.error)
 
   function display(text: string, error = false) {
     if (live.current) setNotice({ text, error })
@@ -346,24 +351,25 @@ export function useWorkbench(
 
   async function saveDraft(finalize = false, markLow = false, onVerified?: (record: ProductionItem) => void) {
     if (!doc || !canSaveDraft) return
-    const video = needsRemotion(doc.record)
-    const parsed = parseRemotion(remotion)
-    if (video && (parsed.error || (finalize && renderDataIssue(parsed)))) return
     const markdown = doc.markdown
+    if (finalize && (!markdown.trim() || (video && renderDataIssue(parsedRemotion)))) return
     await run('saving', async () => {
       display(finalize ? '正在定稿…' : '正在保存草稿…')
       try {
         const saved = await api.updateProductionItem(id, {
           draft_md: markdown,
-          ...(video ? { video_script: script, remotion_data: parsed.value } : {}),
+          ...(writeScript ? { video_script: script } : {}),
+          ...(writeRemotion ? { remotion_data: parsedRemotion.value } : {}),
           ...(finalize ? {
             final_md: markdown, final_content: markdown, workflow_status: '已定稿' as const,
             ...(markLow ? { compliance_risk: '低风险' } : {}),
           } : {}),
         })
         acceptWrite(saved, markdown)
-        if (saved.draft_md !== markdown || (video && ((saved.video_script ?? '') !== script ||
-            !sameRemotion(parseRemotion(remotionText(saved.remotion_data)).value, parsed.value))) ||
+        const storedRemotion = writeRemotion ? parseRemotion(remotionText(saved.remotion_data)) : null
+        if ((saved.draft_md ?? '') !== markdown ||
+            (writeScript && (saved.video_script ?? '') !== script) ||
+            (storedRemotion && (storedRemotion.error || !sameRemotion(storedRemotion.value, parsedRemotion.value))) ||
             (finalize && (saved.workflow_status !== '已定稿' || saved.final_md !== markdown || saved.final_content !== markdown ||
               (markLow && saved.compliance_risk !== '低风险' && saved.compliance_risk !== '低')))) {
           display('写入结果与回读不一致，当前编辑已保留。', true)
@@ -550,6 +556,6 @@ export function useWorkbench(
   return {
     doc, note, setNote, dirty, pending, watching, operation, notice, copyNotice, canSave, canPublish, canRewrite, canToggleBenchmark,
     refresh, edit, save, publish, rewrite, toggleBenchmark, copy, adoptIncoming, restoreBackup,
-    script, remotion, canSaveDraft, canPolish, saveDraft, polish, editScript, editRemotion,
+    script, remotion, parsedRemotion, canSaveDraft, canPolish, saveDraft, polish, editScript, editRemotion,
   }
 }

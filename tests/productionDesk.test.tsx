@@ -156,7 +156,7 @@ it('只有主赛道显示 WF3，默认配置可提交并反馈代理尚未接入
   fireEvent.click(card(sub.zh_title).getByRole('button', { name: '打开工作台' }))
   modal = within(await screen.findByRole('dialog'))
   await modal.findByText('等待核对')
-  expect(modal.getByRole<HTMLButtonElement>('tab', { name: '视频口播稿' }).disabled).toBe(true)
+  expect(modal.getByRole<HTMLButtonElement>('tab', { name: '视频口播稿' }).disabled).toBe(false)
   expect(modal.queryByRole('button', { name: '提交 Remotion 渲染' })).toBeNull()
 })
 
@@ -220,4 +220,80 @@ it('复制当前标题、Markdown、纯文本和口播稿，并可对照原始�
     if (original) Object.defineProperty(navigator, 'clipboard', original)
     else Reflect.deleteProperty(navigator, 'clipboard')
   }
+})
+
+it('旧赛道的四个标签均可切换，口播和 JSON 可保存且信源面板显示核查备注', async () => {
+  const old: ProductionItem = {
+    ...main,
+    track_tag: '商业数据',
+    need_remotion: null,
+    compliance_risk: '低风险',
+    compliance_report: null,
+    fact_check_notes: '重新核对统计口径',
+    remotion_data: null,
+  }
+  const api = mount(createContentHubApi({}), [old])
+  vi.spyOn(api, 'getProductionItem').mockResolvedValue(old)
+  const write = vi.spyOn(api, 'updateProductionItem').mockImplementation(async (_id, patch) => ({ ...old, ...patch }))
+  await screen.findByRole('article', { name: old.zh_title })
+  fireEvent.click(card(old.zh_title).getByRole('button', { name: '打开工作台' }))
+  const modal = within(await screen.findByRole('dialog'))
+  const scriptTab = await modal.findByRole<HTMLButtonElement>('tab', { name: '视频口播稿' })
+  expect(scriptTab.disabled).toBe(false)
+  fireEvent.click(scriptTab)
+  expect(scriptTab.getAttribute('aria-selected')).toBe('true')
+  const script = modal.getByRole('textbox', { name: '口播脚本' })
+  fireEvent.change(script, { target: { value: '这是改过的开头' } })
+  expect(modal.getByText('未保存')).toBeTruthy()
+
+  fireEvent.click(modal.getByRole('tab', { name: 'Remotion 渲染数据' }))
+  const json = modal.getByRole('textbox', { name: 'Remotion JSON' })
+  fireEvent.change(json, { target: { value: '{"scenes":[{}]}' } })
+  expect(within(modal.getByRole('tabpanel')).getByRole('alert').textContent).toContain('scenes[0].source')
+  fireEvent.change(json, { target: { value: '{"scenes":[{"source":"统计年鉴"}]}' } })
+  expect(within(modal.getByRole('tabpanel')).getByRole('alert').textContent).toContain('来源年份')
+  fireEvent.change(json, { target: { value: '{"scenes":[{"source":"统计年鉴","source_year":2024}]}' } })
+  expect(json.getAttribute('aria-invalid')).toBe('false')
+  expect(modal.queryByRole('button', { name: '提交 Remotion 渲染' })).toBeNull()
+
+  fireEvent.click(modal.getByRole('tab', { name: '原始信源与大纲' }))
+  const source = within(modal.getByRole('tabpanel', { name: '原始信源与大纲' }))
+  expect(source.getByText(old.source_name)).toBeTruthy()
+  expect(source.getByText('重新核对统计口径')).toBeTruthy()
+  expect(source.getByRole('link', { name: '打开原文' }).getAttribute('href')).toBe(old.url)
+  expect(source.getByText(old.key_data_points)).toBeTruthy()
+  fireEvent.keyDown(modal.getByRole('tab', { name: '原始信源与大纲' }), { key: 'Home' })
+  expect(modal.getByRole('tab', { name: '图文正文' }).getAttribute('aria-selected')).toBe('true')
+
+  fireEvent.click(modal.getByRole('button', { name: '保存草稿' }))
+  await modal.findByText('草稿已保存')
+  expect(write).toHaveBeenCalledExactlyOnceWith(old.id, {
+    zh_title: old.zh_title, draft_md: old.draft_md, video_script: '这是改过的开头',
+    remotion_data: { scenes: [{ source: '统计年鉴', source_year: 2024 }] },
+  })
+})
+
+it('空白 Remotion 数据填好后解除缺失提示，保存回读后可提交渲染', async () => {
+  const eligible: ProductionItem = { ...main, compliance_risk: '低风险', remotion_data: null }
+  const api = mount(createContentHubApi({}), [eligible])
+  vi.spyOn(api, 'getProductionItem').mockResolvedValue(eligible)
+  vi.spyOn(api, 'updateProductionItem').mockImplementation(async (_id, patch) => ({ ...eligible, ...patch }))
+  await screen.findByRole('article', { name: eligible.zh_title })
+  fireEvent.click(card(eligible.zh_title).getByRole('button', { name: '打开工作台' }))
+  const modal = within(await screen.findByRole('dialog'))
+  fireEvent.click(await modal.findByRole('tab', { name: 'Remotion 渲染数据' }))
+  const panel = within(modal.getByRole('tabpanel', { name: 'Remotion 渲染数据' }))
+  const renderButton = modal.getByRole<HTMLButtonElement>('button', { name: '提交 Remotion 渲染' })
+  expect(panel.getByText('请先填写 Remotion JSON。')).toBeTruthy()
+  expect(renderButton.disabled).toBe(true)
+  const json = panel.getByRole<HTMLTextAreaElement>('textbox', { name: 'Remotion JSON' })
+  fireEvent.change(json, { target: { value: '{"cards":[{"source":"原始数据（2024）"}]}' } })
+  expect(modal.queryByText('请先填写 Remotion JSON。')).toBeNull()
+  expect(json.getAttribute('aria-invalid')).toBe('false')
+  fireEvent.click(panel.getByRole('button', { name: '格式化 JSON' }))
+  expect(json.value).toContain('\n  "cards": [')
+  expect(renderButton.disabled).toBe(true)
+  fireEvent.click(modal.getByRole('button', { name: '保存草稿' }))
+  await modal.findByText('草稿已保存')
+  expect(renderButton.disabled).toBe(false)
 })

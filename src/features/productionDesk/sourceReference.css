@@ -1,0 +1,3 @@
+.desk-reference { display: grid; gap: 11px; overflow-wrap: anywhere; }
+.desk-reference h3 { font-size: 13px; font-weight: 680; margin-bottom: 3px; }
+.desk-reference p { font-size: 13px; white-space: pre-wrap; }

@@ -10,10 +10,13 @@ import { isWorkflowStatus, productionRiskLabel } from '../../types/schema'
 import type { ProductionItem } from '../../types/schema'
 import { externalUrl } from '../../utils/externalUrl'
 import { MarkdownPreview } from './MarkdownPreview'
+import { editorialTabs, Tabs } from './EditorTabs'
+import type { EditorialTab } from './EditorTabs'
+import { SourceReference } from '../productionDesk/SourceReference'
 import { useUnsavedChanges } from '../../app/UnsavedChanges'
 import { lastWorkbenchId, rememberWorkbench, WorkbenchQueue, workbenchQueue } from './WorkbenchQueue'
 import { needsRemotion, editorialWarnings, renderDataIssue, renderRecordIsCurrent, reviewIssue } from '../productionDesk/editingRules'
-import { parseRemotion, remotionText } from '../productionDesk/remotion'
+import { remotionText } from '../productionDesk/remotion'
 import { RenderResults, useRenderResults } from '../productionDesk/RenderResults'
 import { VideoControls } from './VideoControls'
 import { useWorkbench } from './useWorkbench'
@@ -28,7 +31,6 @@ interface WorkbenchProps {
   onWrite: (record: ProductionItem) => void
   refreshBoard: () => void
 }
-type Tab<T extends string> = { value: T; label: string }
 
 const sourceTabs = [
   { value: 'raw', label: '原文素材' },
@@ -48,44 +50,6 @@ const revisionTemplates = [
   { label: '头条号快节奏', note: '压缩到1200字以内，开头第一句直接抛结论或反常识数字，小标题改为带悬念的问句，多用口语连接词，结尾加一个引发评论区讨论的问题。' },
   { label: '逻辑拔高', note: '删掉车轱辘话和废话，保留全部核查数据与年份口径，将核心观点改为“反常识结论+数据支撑+现实推演”结构，提升信息密度。' },
 ] as const
-
-function Tabs<T extends string>({ group, label, options, value, select }: {
-  group: string
-  label: string
-  options: readonly Tab<T>[]
-  value: T
-  select: (value: T) => void
-}) {
-  return (
-    <div className="wb-tabs" role="tablist" aria-label={label} onKeyDown={event => {
-      const current = options.findIndex(tab => tab.value === value)
-      let next: number
-      switch (event.key) {
-        case 'ArrowLeft': next = (current + options.length - 1) % options.length; break
-        case 'ArrowRight': next = (current + 1) % options.length; break
-        case 'Home': next = 0; break
-        case 'End': next = options.length - 1; break
-        default: return
-      }
-      event.preventDefault()
-      select(options[next].value)
-      event.currentTarget.querySelectorAll('button')[next]?.focus()
-    }}>
-      {options.map(tab => (
-        <button
-          key={tab.value}
-          type="button"
-          id={`${group}-${tab.value}`}
-          role="tab"
-          aria-selected={value === tab.value}
-          aria-controls={`${group}-panel`}
-          tabIndex={value === tab.value ? 0 : -1}
-          onClick={() => select(tab.value)}
-        >{tab.label}</button>
-      ))}
-    </div>
-  )
-}
 
 function Sources({ record }: { record: ProductionItem }) {
   const [tab, setTab] = useState<(typeof sourceTabs)[number]['value']>('raw')
@@ -179,18 +143,21 @@ function Workbench({ api, id, writes, sessions, onWrite, refreshBoard, topicsPat
   const record = doc?.record
   const [reviewTicket, setReviewTicket] = useState<string | null>(null)
   const [polishNote, setPolishNote] = useState('')
+  const [contentTab, setContentTab] = useState<EditorialTab>('article')
   const [reviewedFields, setReviewedFields] = useState<string | null>(null)
   const [renderingRequest, setRenderingRequest] = useState(false)
   const [renderNotice, setRenderNotice] = useState<{ text: string; error?: boolean } | null>(null)
   const video = Boolean(record && needsRemotion(record))
   const render = useRenderResults(api, record, video)
-  const parsed = parseRemotion(video ? workbench.remotion : '')
+  const parsed = workbench.parsedRemotion
   const warnings = editorialWarnings({ title: record?.zh_title ?? '', article: doc?.markdown ?? '', script: workbench.script })
   const reviewKey = JSON.stringify([record?.zh_title, doc?.markdown, workbench.script, workbench.remotion])
   const markLow = reviewTicket === reviewKey
   const reviewReason = record ? reviewIssue(record, warnings, markLow || reviewedFields === reviewKey) : null
-  const dataReason = video ? renderDataIssue(parsed) : null
-  const finalizeReason = reviewReason || dataReason || (!record?.zh_title.trim() ? '请先补齐中文标题。' : null)
+  const jsonIssue = renderDataIssue(parsed)
+  const dataReason = video ? jsonIssue : null
+  const finalizeReason = reviewReason || dataReason ||
+    (!record?.zh_title.trim() || !doc?.markdown.trim() ? '定稿需要中文标题和图文正文。' : null)
   const renderReason = reviewReason || dataReason ||
     (productionRiskLabel(record?.compliance_risk ?? '') === '高风险' ? '请先用人工复核操作保存低风险等级。' : null) ||
     (workbench.dirty ? '请先保存草稿和渲染数据。' : null) ||
@@ -198,6 +165,7 @@ function Workbench({ api, id, writes, sessions, onWrite, refreshBoard, topicsPat
   useUnsavedChanges(workbench.dirty || markLow)
   useEffect(() => { if (record) rememberWorkbench(record.id) }, [record])
   const noteId = useId()
+  const contentId = noteId + '-content'
   const jsonId = noteId + '-remotion'
   const finalizeReasonId = noteId + '-finalize-reason'
   const renderReasonId = noteId + '-render-reason'
@@ -296,35 +264,44 @@ function Workbench({ api, id, writes, sessions, onWrite, refreshBoard, topicsPat
                 <time dateTime={record.published_at}>{record.published_at}</time>}
               {workbench.pending && !notice && <span>等待回写，可刷新记录查询进度。</span>}
               {!workbench.pending && workbench.dirty && <span>稿件尚有未保存的编辑。</span>}
-              <button type="button" className="button button--quiet wb-jump-to-draft" onClick={() => draftPanel.current?.focus()}>
+              {contentTab === 'article' && <button type="button" className="button button--quiet wb-jump-to-draft"
+                onClick={() => draftPanel.current?.focus()}>
                 <ArrowDown size={15} aria-hidden />跳到稿件
-              </button>
+              </button>}
             </div>
             {record.need_remotion !== false && record.track_tag !== 'sub_toutiao' && <VideoControls api={api} productionId={id} />}
           </div>
-          <div className="wb-grid">
-            <Sources record={record} />
-            <EditorPanel workbench={workbench} panel={draftPanel} />
+          <Tabs group={contentId} label="精修内容" className="wb-tabs wb-content-tabs"
+            options={editorialTabs} value={contentTab} select={setContentTab} />
+          <div id={contentId + '-panel'} role="tabpanel" aria-labelledby={contentId + '-' + contentTab}
+            tabIndex={contentTab === 'sources' ? 0 : undefined} className="wb-content-panel">
+            {contentTab === 'article' && <div className="wb-grid">
+              <Sources record={record} />
+              <EditorPanel workbench={workbench} panel={draftPanel} />
+            </div>}
+            {contentTab === 'script' && <div className="wb-panel wb-extra-editor">
+              <label htmlFor={jsonId + '-script'}>口播脚本</label>
+              <textarea id={jsonId + '-script'} value={workbench.script} disabled={operation === 'polishing'}
+                onChange={event => workbench.editScript(event.target.value)} />
+            </div>}
+            {contentTab === 'remotion' && <div className="wb-panel wb-extra-editor">
+              <div className="wb-extra-toolbar">
+                <label htmlFor={jsonId}>Remotion JSON</label>
+                <button type="button" className="button button--secondary" disabled={!parsed.value}
+                  onClick={() => workbench.editRemotion(JSON.stringify(parsed.value, null, 2))}>格式化 JSON</button>
+              </div>
+              {!video && <p className="wb-muted">当前选题未启用渲染，仍可编辑并保存数据。</p>}
+              <textarea className="desk-json" spellCheck={false} id={jsonId} value={workbench.remotion}
+                aria-invalid={Boolean(jsonIssue)} aria-describedby={jsonIssue ? jsonId + '-error' : undefined}
+                onChange={event => workbench.editRemotion(event.target.value)} />
+              {jsonIssue && <p id={jsonId + '-error'} className="topic-feedback topic-feedback--warning">{jsonIssue}</p>}
+            </div>}
+            {contentTab === 'sources' && <div className="wb-panel wb-extra-editor"><SourceReference record={record} /></div>}
           </div>
           {warnings.length > 0 && <p className="topic-feedback topic-feedback--warning" role="status">
             高危词待核对 · {warnings.join('；')}
           </p>}
-          {video && <div className="wb-remotion">
-            <details>
-              <summary>视频口播与 Remotion 渲染数据</summary>
-              <label htmlFor={jsonId + '-script'}>视频口播稿</label>
-              <textarea id={jsonId + '-script'} value={workbench.script} disabled={operation === 'polishing'}
-                onChange={event => workbench.editScript(event.target.value)} />
-              <label htmlFor={jsonId}>Remotion JSON</label>
-              <button type="button" className="button button--secondary" disabled={!parsed.value}
-                onClick={() => workbench.editRemotion(JSON.stringify(parsed.value, null, 2))}>格式化 JSON</button>
-              <textarea className="desk-json" spellCheck={false} id={jsonId} value={workbench.remotion}
-                aria-invalid={Boolean(dataReason)} aria-describedby={dataReason ? jsonId + '-error' : undefined}
-                onChange={event => workbench.editRemotion(event.target.value)} />
-              {dataReason && <p id={jsonId + '-error'} className="topic-feedback topic-feedback--warning">{dataReason}</p>}
-            </details>
-            <RenderResults model={render} />
-          </div>}
+          {video && <div className="wb-remotion"><RenderResults model={render} /></div>}
           <footer className="wb-action-footer">
             {renderNotice && <p role={renderNotice.error ? 'alert' : 'status'}>{renderNotice.text}</p>}
             {finalizeReason && <small id={finalizeReasonId}>{finalizeReason}</small>}
@@ -341,7 +318,7 @@ function Workbench({ api, id, writes, sessions, onWrite, refreshBoard, topicsPat
             <div className="wb-footer-actions">
               <label><input type="checkbox" checked={markLow} onChange={event => setReviewTicket(event.target.checked ? reviewKey : null)} /> 人工复核后将风险改为低风险</label>
               {(workbench.dirty || markLow) && <span className="wb-dirty">未保存</span>}
-              <button type="button" className="button button--secondary" disabled={!workbench.canSaveDraft || (video && Boolean(parsed.error))}
+              <button type="button" className="button button--secondary" disabled={!workbench.canSaveDraft}
                 onClick={() => void workbench.saveDraft()}><Save size={15} aria-hidden />保存草稿</button>
               <button type="button" className="button button--primary" disabled={!workbench.canSaveDraft || Boolean(finalizeReason)}
                 aria-describedby={finalizeReason ? finalizeReasonId : undefined}
