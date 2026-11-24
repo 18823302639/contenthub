@@ -173,8 +173,10 @@ def check_unknown_submission(page, base, workflow, from_drawer, transport):
     editor, panel = open_entry(not from_drawer)
     reread(panel)
     submit = editor.get_by_role("button", name=re.compile("Remotion 渲染"))
-    if submit.is_enabled():
-        with page.expect_request(lambda request: request.url.endswith(RENDER) and request.method == "POST"):
+    expect(submit).to_be_visible()
+    if not panel.get_by_text(re.compile("提交结果未知")).count():
+        expect(submit).to_be_enabled()
+        with page.expect_response(lambda response: response.url.endswith(RENDER) and response.request.method == "POST"):
             submit.click()
     assert workflow.requests == [{"record_id": 6}], f"{transport}: ambiguous acceptance allowed a second render POST"
     expect(submit).to_be_disabled()
