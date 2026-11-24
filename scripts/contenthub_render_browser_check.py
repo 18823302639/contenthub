@@ -172,7 +172,7 @@ def check_unknown_submission(page, base, workflow, from_drawer, transport):
 
     editor, panel = open_entry(not from_drawer)
     reread(panel)
-    submit = editor.get_by_role("button", name=re.compile("Remotion 渲染"))
+    submit = editor.get_by_role("button", name=re.compile(r"^(?:重试 Remotion 渲染|提交 Remotion 渲染|Remotion 渲染待核对)$"))
     expect(submit).to_be_visible()
     if not panel.get_by_text(re.compile("提交结果未知")).count():
         expect(submit).to_be_enabled()
@@ -184,7 +184,7 @@ def check_unknown_submission(page, base, workflow, from_drawer, transport):
 
     page.reload()
     editor, panel = open_entry(not from_drawer)
-    submit = editor.get_by_role("button", name=re.compile("Remotion 渲染"))
+    submit = editor.get_by_role("button", name=re.compile(r"^(?:重试 Remotion 渲染|提交 Remotion 渲染|Remotion 渲染待核对)$"))
     expect(submit).to_be_disabled()
     expect(panel.get_by_text(re.compile("提交结果未知"))).to_be_visible()
 
@@ -371,9 +371,9 @@ def main():
         try:
             base = f"http://127.0.0.1:{server.server_port}"
             with sync_playwright() as playwright, playwright.chromium.launch(chromium_sandbox=True) as browser:
+                check_cross_origin_download(browser, base, media_file)
                 run_unknown_cases(browser, base)
                 check_legacy_submission(browser, base)
-                check_cross_origin_download(browser, base, media_file)
                 for width, height in ((1440, 900), (390, 844)):
                     touch = width < 768
                     context = browser.new_context(
