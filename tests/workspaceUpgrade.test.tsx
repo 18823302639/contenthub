@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { createMemoryRouter, RouterProvider } from 'react-router-dom'
 import { afterEach, expect, it, vi } from 'vitest'
 import type { ContentHubApi } from '../src/api'
-import { createContentHubApi } from '../src/api'
+import { ApiHttpError, createContentHubApi } from '../src/api'
 import { ContentHubApp } from '../src/app/ContentHubApp'
 import { RenderResults, useRenderResults } from '../src/features/productionDesk/RenderResults'
 import type { ProductionItem } from '../src/types/schema'
@@ -471,4 +471,39 @@ it('同一任务先完成后补齐成片地址时，仍可通过刷新获取下�
   vi.mocked(api.getProductionItem).mockResolvedValueOnce({ ...completed, video_url: '/current.mp4' })
   fireEvent.click(screen.getByRole('button', { name: '刷新渲染状态' }))
   expect((await screen.findByRole('link', { name: '下载视频' })).getAttribute('href')).toBe('/current.mp4')
+})
+
+it('旧站未暴露任务 ID 时，代理 504 后旧终态不会解除只读核对', async () => {
+  const initial = { ...row, render_status: 'failed' }
+  const api = fixture([initial])
+  const trigger = vi.spyOn(api, 'triggerRender').mockRejectedValueOnce(new ApiHttpError('n8n Webhook', 504))
+  mount(api, '/workbench?id=1')
+  await editor()
+  fireEvent.click(screen.getByRole('button', { name: '重试 Remotion 渲染' }))
+  const results = within(screen.getByRole('region', { name: '渲染状态与成片' }))
+  await results.findByText('渲染状态 · 提交结果未知')
+  const refresh = results.getByRole('button', { name: '刷新渲染状态' })
+  vi.mocked(api.getProductionItem).mockResolvedValueOnce({ ...initial, render_status: 'completed', video_url: '/old.mp4' })
+  await act(async () => fireEvent.click(refresh))
+  expect(results.queryByRole('link', { name: '下载视频' })).toBeNull()
+  const submit = screen.getByRole<HTMLButtonElement>('button', { name: 'Remotion 渲染待核对' })
+  expect(submit.disabled).toBe(true)
+  fireEvent.click(submit)
+  expect(trigger).toHaveBeenCalledTimes(1)
+})
+
+it('渲染 POST 明确被拒绝时，保留下一次人工提交入口', async () => {
+  const api = fixture([row])
+  const trigger = vi.spyOn(api, 'triggerRender')
+    .mockRejectedValueOnce(new ApiHttpError('n8n Webhook', 403))
+    .mockResolvedValueOnce({ accepted: true, status: 202 })
+  mount(api, '/workbench?id=1')
+  await editor()
+  const submit = screen.getByRole<HTMLButtonElement>('button', { name: '提交 Remotion 渲染' })
+  fireEvent.click(submit)
+  await screen.findByText(/HTTP 403/)
+  expect(submit.disabled).toBe(false)
+  fireEvent.click(submit)
+  await screen.findByText('Remotion 渲染请求已受理')
+  expect(trigger).toHaveBeenCalledTimes(2)
 })

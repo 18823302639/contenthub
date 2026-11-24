@@ -26,7 +26,7 @@ jobs:
       - name: Verify the release candidate tree
         run: |
           set -euo pipefail
-          expected='f6b7dc9882f62b2dd41c3f2555387fc42d55b426'
+          expected='13fd163e22ac3fc048c80d24d2c82df9fbedc686'
           candidate="$(git log --format='%H %T' | awk -v want="$expected" '$2 == want && !seen++ {print $1}')"
           test -n "$candidate"
           git diff --quiet "$candidate" HEAD -- . ':!.github/workflows/contenthub-mock-browser.yml' ':!scripts/contenthub_mock_browser_check.py' ':!scripts/contenthub_render_browser_check.py' ':!scripts/fixtures/contenthub-blue-160x90.mp4.b64'

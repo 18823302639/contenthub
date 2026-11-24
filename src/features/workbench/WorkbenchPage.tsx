@@ -149,7 +149,7 @@ function Workbench({ api, id, writes, sessions, onWrite, refreshBoard, topicsPat
   const [renderingRequest, setRenderingRequest] = useState(false)
   const [renderNotice, setRenderNotice] = useState<{ text: string; error?: boolean } | null>(null)
   const video = Boolean(record && needsRemotion(record))
-  const render = useRenderResults(api, record, video)
+  const render = useRenderResults(api, record, video, writes.renderChecks)
   const parsed = workbench.parsedRemotion
   const warnings = editorialWarnings({ title: record?.zh_title ?? '', article: doc?.markdown ?? '', script: workbench.script })
   const reviewKey = JSON.stringify([record?.zh_title, doc?.markdown, workbench.script, workbench.remotion])
@@ -173,7 +173,7 @@ function Workbench({ api, id, writes, sessions, onWrite, refreshBoard, topicsPat
   const rewritingLabel = watching ? aiProcessingLabel : sendingRewrite ? '正在提交改稿…' : 'AI 去味改稿'
 
   async function submitRender() {
-    if (!record || !video || renderReason || renderingRequest || operation !== null) return
+    if (!record || !video || renderReason || renderingRequest || operation !== null || render.blocked) return
     const release = writes.acquire(id)
     if (!release) return
     setRenderingRequest(true)
@@ -184,8 +184,7 @@ function Workbench({ api, id, writes, sessions, onWrite, refreshBoard, topicsPat
         throw new Error('记录已变更或不满足渲染条件，请刷新记录核对。')
       }
       if (!render.confirmSubmission(latest)) return
-      const receipt = await api.triggerRender(id)
-      render.accepted(latest, receipt.jobId)
+      if (!await render.submit(latest)) return
       setRenderNotice({ text: 'Remotion 渲染请求已受理' })
     } catch (error) {
       setRenderNotice({ text: error instanceof Error ? error.message : '渲染请求未确认。', error: true })
@@ -269,7 +268,7 @@ function Workbench({ api, id, writes, sessions, onWrite, refreshBoard, topicsPat
                 <ArrowDown size={15} aria-hidden />跳到稿件
               </button>}
             </div>
-            {record.need_remotion !== false && record.track_tag !== 'sub_toutiao' && <VideoControls api={api} productionId={id} />}
+            {record.need_remotion !== false && record.track_tag !== 'sub_toutiao' && <VideoControls api={api} productionId={id} checks={writes.renderChecks} />}
           </div>
           <DraftGenerationActions api={api} record={record} writes={writes}
             busy={operation !== null || renderingRequest} editorHasContent={Boolean(doc.markdown.trim()) || workbench.dirty}
@@ -328,7 +327,7 @@ function Workbench({ api, id, writes, sessions, onWrite, refreshBoard, topicsPat
                   if (markLow) setReviewedFields(JSON.stringify([saved.zh_title, saved.draft_md, saved.video_script ?? '', remotionText(saved.remotion_data)]))
                   setReviewTicket(null)
                 })}>人工复核通过并定稿</button>
-              {video && <button type="button" className="button button--secondary" disabled={Boolean(renderReason) || renderingRequest || operation !== null || writes.lockedIds.has(id)}
+              {video && <button type="button" className="button button--secondary" disabled={Boolean(renderReason) || renderingRequest || operation !== null || writes.lockedIds.has(id) || render.blocked}
                 aria-describedby={renderReason ? (renderReason === finalizeReason ? finalizeReasonId : renderReasonId) : undefined}
                 onClick={() => void submitRender()}>{renderingRequest ? '正在提交…' : render.submitLabel}</button>}
             </div>

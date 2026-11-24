@@ -182,6 +182,12 @@ def check_unknown_submission(page, base, workflow, from_drawer, transport):
     expect(submit).to_be_disabled()
     expect(panel.get_by_text(re.compile("提交结果未知"))).to_be_visible()
 
+    page.reload()
+    editor, panel = open_entry(not from_drawer)
+    submit = editor.get_by_role("button", name=re.compile("Remotion 渲染"))
+    expect(submit).to_be_disabled()
+    expect(panel.get_by_text(re.compile("提交结果未知"))).to_be_visible()
+
     workflow.failed_reads = 1
     reread(panel)
     expect(panel.get_by_role("alert")).to_contain_text("渲染状态读取失败")
@@ -193,6 +199,12 @@ def check_unknown_submission(page, base, workflow, from_drawer, transport):
     expect(submit).to_be_disabled()
     expect(panel.get_by_role("link", name="下载视频")).to_have_count(0)
     assert workflow.requests == [{"record_id": 6}]
+
+    # Even a different unobserved job ID is not proof that this submission ran.
+    workflow.row.update(render_job_id="qa-even-older", render_status="failed", video_url="")
+    reread(panel)
+    expect(submit).to_be_disabled()
+    expect(panel.get_by_text(re.compile("提交结果未知"))).to_be_visible()
 
     workflow.row.update(render_job_id="qa-current", render_status="rendering", video_url="")
     reread(panel)
@@ -210,7 +222,7 @@ def check_unknown_submission(page, base, workflow, from_drawer, transport):
     expect(panel.get_by_role("alert")).to_contain_text("合成当前任务失败")
     expect(button(editor, "重试 Remotion 渲染")).to_be_enabled()
     assert workflow.requests == [{"record_id": 6}]
-    with page.expect_request(lambda request: request.url.endswith(RENDER) and request.method == "POST"):
+    with page.expect_response(lambda response: response.url.endswith(RENDER) and response.request.method == "POST"):
         button(editor, "重试 Remotion 渲染").click()
     assert workflow.requests == [{"record_id": 6}, {"record_id": 6}]
     assert not workflow.unexpected, workflow.unexpected
@@ -221,12 +233,17 @@ class UnknownWorkflow(Workflow):
     def __init__(self, base, transport):
         super().__init__(base)
         self.transport = transport
+        self.legacy_requests = []
 
     def route(self, route):
         request = route.request
         url = urlsplit(request.url)
-        if ((url.scheme, url.netloc) == (self.base.scheme, self.base.netloc)
-                and request.method == "POST" and url.path == RENDER and not self.requests):
+        same_origin = (url.scheme, url.netloc) == (self.base.scheme, self.base.netloc)
+        if same_origin and request.method == "POST" and url.path == "/api/n8n/generate-video":
+            self.legacy_requests.append(request.post_data_json)
+            route.fulfill(status=504, json={"message": "synthetic legacy response timed out"})
+            return
+        if same_origin and request.method == "POST" and url.path == RENDER and not self.requests:
             self.requests.append(request.post_data_json)
             if self.transport == "504":
                 route.fulfill(status=504, json={"message": "accepted upstream, response timed out"})
@@ -234,6 +251,27 @@ class UnknownWorkflow(Workflow):
                 route.abort("connectionreset")
             return
         super().route(route)
+
+
+def check_legacy_submission(browser, base):
+    context = browser.new_context(viewport={"width": 1440, "height": 900}, service_workers="block")
+    workflow = UnknownWorkflow(base, "504")
+    context.route("**/*", workflow.route)
+    page = context.new_page()
+    try:
+        page.goto(f"{base}/#/workbench/6")
+        legacy = button(page, "生成视频")
+        legacy.click()
+        expect(page.get_by_role("alert").filter(has_text="视频任务提交结果未知")).to_be_visible()
+        expect(legacy).to_be_disabled()
+        page.reload()
+        expect(legacy).to_be_disabled()
+        expect(page.get_by_role("alert").filter(has_text="请先核对 n8n 执行记录")).to_be_visible()
+        assert workflow.legacy_requests == [{"production_id": 6, "format": "16x9", "voice": "zh-CN-YunxiNeural"}]
+        assert not workflow.requests and not workflow.unexpected
+        print("PASS 旧 generate-video 在 504 后保留核对状态，重载无第二次 POST，原请求体保持一致", flush=True)
+    finally:
+        context.close()
 
 
 def run_unknown_cases(browser, base):
@@ -261,6 +299,7 @@ def main():
             base = f"http://127.0.0.1:{server.server_port}"
             with sync_playwright() as playwright, playwright.chromium.launch(chromium_sandbox=True) as browser:
                 run_unknown_cases(browser, base)
+                check_legacy_submission(browser, base)
                 for width, height in ((1440, 900), (390, 844)):
                     touch = width < 768
                     context = browser.new_context(

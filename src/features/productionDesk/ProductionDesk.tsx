@@ -74,7 +74,7 @@ function DeskEditor({ api, record: initial, writes, onSaved, requestClose, regis
   const [operation, setOperation] = useState<Operation | null>(null)
   const [notice, setNotice] = useState<Notice | null>(null)
   const main = needsRemotion(record)
-  const render = useRenderResults(api, record, main)
+  const render = useRenderResults(api, record, main, writes.renderChecks)
   const parsed = parseRemotion(values.remotion)
   const jsonIssue = parsed.error ?? renderDataWarning(parsed)
   const warnings = editorialWarnings(values)
@@ -173,7 +173,7 @@ function DeskEditor({ api, record: initial, writes, onSaved, requestClose, regis
   }
 
   async function renderVideo() {
-    if (!main || renderReason || busy) return
+    if (!main || renderReason || busy || render.blocked) return
     const release = writes.acquire(record.id)
     if (!release) return
     setNotice(null)
@@ -186,8 +186,7 @@ function DeskEditor({ api, record: initial, writes, onSaved, requestClose, regis
         return
       }
       if (!render.confirmSubmission(latest)) return
-      const receipt = await api.triggerRender(record.id)
-      render.accepted(latest, receipt.jobId)
+      if (!await render.submit(latest)) return
       setNotice({ text: 'Remotion 渲染请求已受理' })
     } catch (error) {
       setNotice({ text: message(error), error: true })
@@ -321,7 +320,7 @@ function DeskEditor({ api, record: initial, writes, onSaved, requestClose, regis
           {main && (
             <span title={renderReason ?? undefined} tabIndex={renderReason ? 0 : undefined}
               aria-describedby={renderReason ? (renderReason === finalizeReason ? finalizeReasonId : renderReasonId) : undefined}>
-              <button type="button" className="button button--secondary" disabled={busy || Boolean(renderReason)}
+              <button type="button" className="button button--secondary" disabled={busy || Boolean(renderReason) || render.blocked}
                 onClick={() => void renderVideo()}>{operation === 'render' ? '正在提交…' : render.submitLabel}</button>
             </span>
           )}

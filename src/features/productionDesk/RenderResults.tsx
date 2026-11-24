@@ -1,6 +1,8 @@
 import { Copy, Download, RefreshCw } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ContentHubApi } from '../../api'
+import { isDefiniteRenderRejection } from '../../app/renderSubmissionChecks'
+import type { RenderSubmissionChecks } from '../../app/renderSubmissionChecks'
 import type { ProductionItem } from '../../types/schema'
 import './renderResults.css'
 
@@ -53,13 +55,29 @@ function mediaUrl(value: string | undefined) {
   }
 }
 
-export function useRenderResults(api: ContentHubApi, record: ProductionItem | undefined, enabled: boolean) {
+export function useRenderResults(api: ContentHubApi, record: ProductionItem | undefined, enabled: boolean, checks?: RenderSubmissionChecks) {
   const [tracker, setTracker] = useState<Tracker | null>(() => record ? { record, previous: undefined } : null)
   const [reading, setReading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const activeRead = useRef<AbortController | null>(null)
   const id = record?.id
-  const phase = tracker && (tracker.previous !== undefined ? 'rendering' : phaseOf(tracker.record.render_status))
+  const check = id === undefined ? undefined : checks?.checks['remotion:' + id]
+  const { get: getCheck, observe: observeCheck } = checks ?? {}
+  const needsVerification = Boolean(check && (!check.jobId || check.jobId !== tracker?.record.render_job_id))
+  const phase: RenderPhase | 'unknown' | 'submitting' = check?.sending ? 'submitting' : needsVerification ? 'unknown'
+    : tracker?.previous !== undefined ? 'rendering' : phaseOf(tracker?.record.render_status)
+
+  const observeRecord = useCallback((latest: ProductionItem) => {
+    if (getCheck?.('remotion', latest.id)) {
+      const result = phaseOf(latest.render_status)
+      const jobId = latest.render_job_id
+      if (result === 'idle' || !jobId || !observeCheck?.(latest.id, jobId, result !== 'rendering')) return
+      setTracker(current => current?.jobId === jobId
+        ? observe(current, latest) : { record: latest, previous: undefined, jobId })
+      return
+    }
+    setTracker(current => current ? observe(current, latest) : { record: latest, previous: undefined })
+  }, [getCheck, observeCheck])
 
   useEffect(() => () => {
     const read = activeRead.current
@@ -67,8 +85,8 @@ export function useRenderResults(api: ContentHubApi, record: ProductionItem | un
     read?.abort()
   }, [])
   useEffect(() => {
-    if (record) setTracker(current => current ? observe(current, record) : { record, previous: undefined })
-  }, [record])
+    if (record) observeRecord(record)
+  }, [record, observeRecord])
 
   const refresh = useCallback(async () => {
     if (!enabled || id === undefined || activeRead.current) return
@@ -84,12 +102,12 @@ export function useRenderResults(api: ContentHubApi, record: ProductionItem | un
       const latest = await Promise.race([api.getProductionItem(id, read.signal), cancelled])
       if (latest.id !== id) throw new Error('返回记录与当前稿件不一致。')
       if (activeRead.current === read) {
-        setTracker(current => current ? observe(current, latest) : { record: latest, previous: undefined })
+        observeRecord(latest)
       }
     } catch (cause) {
       if (activeRead.current === read) {
-        setError(read.signal.aborted ? '渲染状态读取超时，可重试。' :
-          '渲染状态读取失败，可重试。' + (cause instanceof Error ? cause.message : ''))
+        setError(read.signal.aborted ? '渲染状态读取超时，请刷新状态重试。' :
+          '渲染状态读取失败，请刷新状态重试。' + (cause instanceof Error ? cause.message : ''))
       }
     } finally {
       window.clearTimeout(timer)
@@ -98,22 +116,32 @@ export function useRenderResults(api: ContentHubApi, record: ProductionItem | un
         setReading(false)
       }
     }
-  }, [api, id, enabled])
+  }, [api, id, enabled, observeRecord])
 
   useEffect(() => {
-    if (!enabled || phase !== 'rendering') return
+    if (!enabled || (phase !== 'rendering' && phase !== 'unknown')) return
     const timer = window.setInterval(() => void refresh(), 10_000)
     return () => window.clearInterval(timer)
   }, [enabled, phase, refresh])
 
-  function accepted(baseline: ProductionItem, jobId?: string) {
+  async function submit(baseline: ProductionItem) {
+    const finish = checks?.begin('remotion', baseline.id, baseline.render_job_id)
+    if (checks && !finish) return false
     const read = activeRead.current
     activeRead.current = null
     read?.abort()
     setReading(false)
     setError(null)
-    const trackedJobId = baseline.render_job_id === undefined ? undefined : jobId
-    setTracker({ record: baseline, previous: fingerprint(baseline), jobId: trackedJobId })
+    try {
+      const receipt = await api.triggerRender(baseline.id)
+      const jobId = baseline.render_job_id === undefined ? undefined : receipt.jobId
+      setTracker({ record: baseline, previous: fingerprint(baseline), jobId })
+      finish?.(false)
+      return true
+    } catch (error) {
+      finish?.(!isDefiniteRenderRejection(error))
+      throw error
+    }
   }
 
   function confirmSubmission(latest: ProductionItem) {
@@ -121,16 +149,19 @@ export function useRenderResults(api: ContentHubApi, record: ProductionItem | un
     return !inProgress || window.confirm('任务仍显示渲染中，重新提交可能产生重复任务。确定重试吗？')
   }
 
-  const submitLabel = phase === 'rendering' || phase === 'failed' ? '重试 Remotion 渲染' : '提交 Remotion 渲染'
-  const jobId = tracker?.jobId ?? (tracker?.previous === undefined ? tracker?.record.render_job_id : undefined)
-  return { record: tracker?.record, jobId, phase: phase || 'idle', refresh, reading, error, accepted, confirmSubmission, submitLabel }
+  const submitLabel = check ? 'Remotion 渲染待核对'
+    : phase === 'rendering' || phase === 'failed' ? '重试 Remotion 渲染' : '提交 Remotion 渲染'
+  const jobId = check ? check.jobId : tracker?.jobId ?? (tracker?.previous === undefined ? tracker?.record.render_job_id : undefined)
+  return { record: tracker?.record, jobId, phase, refresh, reading, error, submit, confirmSubmission, submitLabel, blocked: Boolean(check) }
 }
 
-const states: Record<RenderPhase, string> = { idle: '未开始', rendering: '渲染中', completed: '已完成', failed: '失败' }
+const states: Record<RenderPhase | 'unknown' | 'submitting', string> = {
+  idle: '未开始', rendering: '渲染中', completed: '已完成', failed: '失败', unknown: '提交结果未知', submitting: '正在提交',
+}
 
 export function RenderResults({ model }: { model: ReturnType<typeof useRenderResults> }) {
   const [copy, setCopy] = useState('')
-  const { phase, record, jobId, reading, refresh, error } = model
+  const { phase, record, jobId, reading, refresh, error, blocked } = model
   const video = phase === 'completed' ? mediaUrl(record?.video_url) : null
   const cardUrls = (record?.cards_urls ?? []).map(mediaUrl).filter((url): url is string => url !== null)
   const cards = phase === 'completed' ? [...new Set(cardUrls)] : []
@@ -143,6 +174,10 @@ export function RenderResults({ model }: { model: ReturnType<typeof useRenderRes
         <RefreshCw size={14} aria-hidden />刷新渲染状态
       </button>
     </div>
+    {phase === 'unknown' && <p className="topic-feedback topic-feedback--warning">
+      上游可能已接收。请刷新渲染状态或核对 n8n 执行记录，确认新任务结束前暂停再次提交。
+    </p>}
+    {blocked && phase === 'rendering' && <p className="results-count">已读到新任务，等待该任务结束后方可再次提交。</p>}
     {jobId && <p className="results-count">任务 ID <code>{jobId}</code></p>}
     {error && <p role="alert" className="topic-feedback topic-feedback--warning">{error}</p>}
     {phase === 'failed' && <p role="alert" className="topic-feedback topic-feedback--warning">
