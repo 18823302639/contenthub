@@ -1,0 +1,68 @@
+name: ContentHub R2 native download acceptance
+
+on:
+  push:
+    branches:
+      - qa-r2-native-download
+
+permissions:
+  contents: read
+
+concurrency:
+  group: contenthub-qa-r2-native-download
+  cancel-in-progress: true
+
+jobs:
+  chromium:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 12
+    if: github.repository == '18823302639/contenthub' && github.ref == 'refs/heads/qa-r2-native-download'
+    steps:
+      - name: Check out the QA branch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify the release candidate tree
+        run: |
+          set -euo pipefail
+          expected='34d0ab90337cc83584abff721abc0587dbb03d3a'
+          candidate="$(git log --format='%H %T' | awk -v want="$expected" '$2 == want && !seen++ {print $1}')"
+          test -n "$candidate"
+          git diff --quiet "$candidate" HEAD -- . ':!.github/workflows/contenthub-mock-browser.yml' ':!scripts/contenthub_mock_browser_check.py' ':!scripts/contenthub_render_browser_check.py' ':!scripts/fixtures/contenthub-blue-160x90.mp4.b64'
+          git log -2 --format='%h %s'
+          echo "Release candidate source commit $candidate, tree $expected"
+      - name: Set up Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+      - name: Install, check and build the Mock app
+        env:
+          VITE_USE_MOCK: 'true'
+        run: |
+          set -euo pipefail
+          npm ci
+          export CONTENTHUB_BUILD_ENV_DIR="$(mktemp -d "$RUNNER_TEMP/contenthub-empty-env.XXXXXX")"
+          npm run typecheck
+          npm test -- --maxWorkers=2
+          npm run build
+      - name: Build for intercepted same-origin render APIs
+        env:
+          VITE_USE_MOCK: 'false'
+          VITE_NOCODB_PRODUCTION_POOL_TABLE_ID: mSyntheticProduction
+        run: |
+          set -euo pipefail
+          export CONTENTHUB_BUILD_ENV_DIR="$(mktemp -d "$RUNNER_TEMP/contenthub-empty-env.XXXXXX")"
+          render_dist="$RUNNER_TEMP/contenthub-render-dist"
+          npm run build -- --outDir "$render_dist"
+          mkdir -p "$render_dist/media"
+          base64 --decode scripts/fixtures/contenthub-blue-160x90.mp4.b64 > "$render_dist/media/current.mp4"
+      - name: Install and run sandboxed Chromium
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/contenthub-qa"
+          qa_python="$RUNNER_TEMP/contenthub-qa/bin/python"
+          "$qa_python" -m pip install --no-input --disable-pip-version-check playwright==1.62.0
+          "$qa_python" -m playwright install --with-deps chromium
+          "$qa_python" scripts/contenthub_mock_browser_check.py --dist dist
+          "$qa_python" scripts/contenthub_render_browser_check.py --dist "$RUNNER_TEMP/contenthub-render-dist"
