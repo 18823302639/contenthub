@@ -509,3 +509,41 @@ it('渲染 POST 明确被拒绝时，保留下一次人工提交入口', async (
   await screen.findByText('Remotion 渲染请求已受理')
   expect(trigger).toHaveBeenCalledTimes(2)
 })
+
+it.each([
+  ['数据库显式期限', '/file.mp4?synthetic=attachment%2Bvalue', '2026-06-03T12:26:00Z'],
+  ['SigV4 请求期限', '/file.mp4?X-Amz-Date=20260603T122500Z&X-Amz-Expires=60&X-Amz-Signature=synthetic', undefined],
+  ['两种期限较早者', '/file.mp4?X-Amz-Date=20260603T122500Z&X-Amz-Expires=60&X-Amz-Signature=synthetic', '2026-06-03T12:28:00Z'],
+])('独立下载使用%s并在过期后保留播放入口', async (_kind, path, expiry) => {
+  vi.useFakeTimers()
+  vi.setSystemTime(new Date('2026-06-03T12:25:59Z'))
+  const attachment = 'https://media.example.invalid' + path
+  const playback = 'https://media.example.invalid/preview.mp4?fixture=playback%2Bvalue'
+  const record = {
+    ...row, render_status: 'completed', video_url: playback, video_download_url: attachment,
+    video_download_expires_at: expiry,
+  }
+  const api = fixture([record])
+  function Panel() { return <RenderResults model={useRenderResults(api, record, true)} /> }
+  render(<Panel />)
+
+  const save = screen.getByRole('link', { name: '下载视频' })
+  expect(save.getAttribute('href')).toBe(attachment)
+  expect(save.hasAttribute('download')).toBe(false)
+  expect(screen.getByLabelText('成片预览').getAttribute('src')).toBe(playback)
+  expect(screen.getByRole('link', { name: '打开视频' }).getAttribute('href')).toBe(playback)
+  await act(async () => vi.advanceTimersByTimeAsync(1000))
+  expect(screen.queryByRole('link', { name: '下载视频' })).toBeNull()
+  expect(screen.getByText(/下载链接已过期/)).toBeTruthy()
+  expect(screen.getByRole('link', { name: '打开视频' }).getAttribute('href')).toBe(playback)
+  expect(api.getProductionItem).not.toHaveBeenCalled()
+})
+
+it.each(['javascript:alert(1)', 'https://example.invalid/play.mp4'])('独立下载地址无效或与播放相同时保留播放链接', videoDownload => {
+  const record = { ...row, render_status: 'completed', video_url: 'https://example.invalid/play.mp4', video_download_url: videoDownload }
+  const api = fixture([record])
+  function Panel() { return <RenderResults model={useRenderResults(api, record, true)} /> }
+  render(<Panel />)
+  expect(screen.queryByRole('link', { name: '下载视频' })).toBeNull()
+  expect(screen.getByRole('link', { name: '打开视频' }).getAttribute('href')).toBe(record.video_url)
+})

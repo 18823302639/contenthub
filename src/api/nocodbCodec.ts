@@ -203,6 +203,8 @@ const decode: Decoders = {
       render_status: readText(row, 'render_status').trim(),
       ...(Object.hasOwn(row, 'render_job_id') ? { render_job_id: readText(row, 'render_job_id').trim() || null } : {}),
       video_url: readText(row, 'video_url').trim(),
+      ...(Object.hasOwn(row, 'video_download_url') ? { video_download_url: readText(row, 'video_download_url').trim() } : {}),
+      ...(Object.hasOwn(row, 'video_download_expires_at') ? { video_download_expires_at: readText(row, 'video_download_expires_at').trim() } : {}),
       render_error: readText(row, 'render_error'),
       cards_urls: Array.isArray(row.cards_urls) || typeof row.cards_urls === 'string'
         ? readTitles(row.cards_urls) : [],
