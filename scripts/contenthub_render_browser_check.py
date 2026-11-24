@@ -260,16 +260,22 @@ def check_legacy_submission(browser, base):
     page = context.new_page()
     try:
         page.goto(f"{base}/#/workbench/6")
-        legacy = button(page, "生成视频")
+        legacy = button(page, "生成视频（旧版）")
+        expect(legacy).to_be_hidden()
+        button(page, "前往 Remotion 渲染").click()
+        page.wait_for_function("document.activeElement?.classList.contains('wb-remotion')")
+        page.get_by_text("旧版视频工具", exact=True).click()
         legacy.click()
         expect(page.get_by_role("alert").filter(has_text="视频任务提交结果未知")).to_be_visible()
         expect(legacy).to_be_disabled()
         page.reload()
+        expect(legacy).to_be_hidden()
+        page.get_by_text("旧版视频工具", exact=True).click()
         expect(legacy).to_be_disabled()
         expect(page.get_by_role("alert").filter(has_text="请先核对 n8n 执行记录")).to_be_visible()
         assert workflow.legacy_requests == [{"production_id": 6, "format": "16x9", "voice": "zh-CN-YunxiNeural"}]
         assert not workflow.requests and not workflow.unexpected
-        print("PASS 旧 generate-video 在 504 后保留核对状态，重载无第二次 POST，原请求体保持一致", flush=True)
+        print("PASS Remotion 主入口直达，旧版默认收起且 504 后重载不再 POST，旧请求合同保持一致", flush=True)
     finally:
         context.close()
 
@@ -312,7 +318,11 @@ def check_cross_origin_download(browser, base, media_file):
     workflow = CrossOriginMedia(base, media_file)
     context.route("**/*", workflow.route)
     downloads = []
-    context.on("page", lambda page: page.on("download", downloads.append))
+
+    def record_download(download):
+        downloads.append(download)
+
+    context.on("page", lambda page: page.on("download", record_download))
     try:
         page = context.new_page()
         page.goto(f"{base}/#/workbench/6")

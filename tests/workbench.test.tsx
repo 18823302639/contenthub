@@ -31,11 +31,16 @@ async function mountVideoTasks(receipt: () => Promise<Response>) {
   }, fetcher)
   mount(3, api)
   await editor()
+  openLegacyVideo()
   return fetcher
 }
 
 function editor() {
   return screen.findByRole<HTMLTextAreaElement>('textbox', { name: 'Markdown 编辑器' })
+}
+
+function openLegacyVideo() {
+  fireEvent.click(screen.getByText('旧版视频工具', { exact: true }))
 }
 
 function enterNote(value: string) {
@@ -76,7 +81,7 @@ describe('改稿台', () => {
     ])
     fireEvent.change(format, { target: { value: '9x16' } })
     fireEvent.change(voice, { target: { value: 'zh-CN-XiaoyiNeural' } })
-    press('生成视频')
+    press('生成视频（旧版）')
 
     const waiting = screen.getByRole<HTMLButtonElement>('button', { name: '正在拆解分镜并推送渲染...' })
     expect(waiting.disabled).toBe(true)
@@ -110,7 +115,7 @@ describe('改稿台', () => {
     ['地址不安全', 'http://render.example.invalid/video.mp4?sig=fake'],
   ])('视频回执%s时提示未提供有效链接，仍保留任务 ID', async (_label, downloadUrl) => {
     await mountVideoTasks(async () => Response.json({ jobId: 'video-queued', downloadUrl }))
-    press('生成视频')
+    press('生成视频（旧版）')
     expect(await screen.findByText('video-queued')).toBeTruthy()
     expect(screen.getByText(/未提供有效的 HTTPS 下载链接/)).toBeTruthy()
     expect(screen.queryByRole('link', { name: '下载成品 MP4' })).toBeNull()
@@ -124,9 +129,9 @@ describe('改稿台', () => {
       .mockResolvedValueOnce(Response.json({ jobId: 'job-first', downloadUrl: firstUrl }))
       .mockReturnValueOnce(retry))
 
-    press('生成视频')
+    press('生成视频（旧版）')
     expect((await screen.findByRole('link', { name: '下载成品 MP4' })).getAttribute('href')).toBe(firstUrl)
-    press('生成视频')
+    press('生成视频（旧版）')
     expect(screen.queryByText('job-first')).toBeNull()
     expect(screen.queryByRole('link', { name: '下载成品 MP4' })).toBeNull()
     await act(async () => failRetry(new Response(null, { status: 502 })))
@@ -138,7 +143,7 @@ describe('改稿台', () => {
     let finishOld!: (response: Response) => void
     const old = new Promise<Response>(resolve => { finishOld = resolve })
     await mountVideoTasks(() => old)
-    press('生成视频')
+    press('生成视频（旧版）')
     await act(async () => { window.location.hash = '#/workbench/4' })
     expect(await screen.findByText(/^选题记录 #4/)).toBeTruthy()
     await editor()
@@ -165,16 +170,18 @@ describe('改稿台', () => {
     }, fetcher)
     mount(3, api)
     await editor()
-    press('生成视频')
+    openLegacyVideo()
+    press('生成视频（旧版）')
     expect((await screen.findByRole('alert')).textContent).toMatch(message)
     expect(screen.queryByRole('link', { name: '下载成品 MP4' })).toBeNull()
-    expect(screen.getByRole<HTMLButtonElement>('button', { name: '生成视频' }).disabled).toBe(true)
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: '生成视频（旧版）' }).disabled).toBe(true)
     cleanup()
     mount(3, api)
     await editor()
-    expect(screen.getByRole<HTMLButtonElement>('button', { name: '生成视频' }).disabled).toBe(true)
+    openLegacyVideo()
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: '生成视频（旧版）' }).disabled).toBe(true)
     expect(screen.getByRole('alert').textContent).toContain('请先核对 n8n 执行记录')
-    press('生成视频')
+    press('生成视频（旧版）')
     expect(fetcher.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1)
   })
 
@@ -184,7 +191,8 @@ describe('改稿台', () => {
     const trigger = vi.spyOn(api, 'triggerWebhook')
     mount(3, api)
     await editor()
-    press('生成视频')
+    openLegacyVideo()
+    press('生成视频（旧版）')
 
     await screen.findByText('mock-video-3-16x9-1')
     expect(trigger).toHaveBeenCalledExactlyOnceWith('generate-video', { production_id: 3, format: '16x9', voice: 'zh-CN-YunxiNeural' })
@@ -599,4 +607,18 @@ describe('改稿台', () => {
     await screen.findByText('无法访问剪贴板，请在编辑区手动复制。')
     expect(screen.queryByText('已复制全文。')).toBeNull()
   })
+})
+
+it('主赛道默认突出 Remotion，并把旧版视频工具收起', async () => {
+  mount(6)
+  await editor()
+  const legacy = screen.getByText('旧版视频工具', { exact: true }).closest('details')
+  expect(legacy?.open).toBe(false)
+  const status = screen.getByRole('region', { name: '渲染状态与成片' })
+  fireEvent.click(screen.getByRole('button', { name: '前往 Remotion 渲染' }))
+  expect(document.activeElement?.contains(status)).toBe(true)
+  expect(screen.getByRole<HTMLButtonElement>('button', { name: '提交 Remotion 渲染' }).disabled).toBe(false)
+  openLegacyVideo()
+  expect(legacy?.open).toBe(true)
+  expect(screen.getByRole('button', { name: '生成视频（旧版）' })).toBeTruthy()
 })

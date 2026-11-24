@@ -169,6 +169,8 @@ function Workbench({ api, id, writes, sessions, onWrite, refreshBoard, topicsPat
   const finalizeReasonId = noteId + '-finalize-reason'
   const renderReasonId = noteId + '-render-reason'
   const draftPanel = useRef<HTMLElement>(null)
+  const renderPanel = useRef<HTMLDivElement>(null)
+  const legacyCheck = writes.renderChecks.checks['legacy:' + id]
   const sendingRewrite = operation === 'rewriting'
   const rewritingLabel = watching ? aiProcessingLabel : sendingRewrite ? '正在提交改稿…' : 'AI 去味改稿'
 
@@ -268,7 +270,14 @@ function Workbench({ api, id, writes, sessions, onWrite, refreshBoard, topicsPat
                 <ArrowDown size={15} aria-hidden />跳到稿件
               </button>}
             </div>
-            {record.need_remotion !== false && record.track_tag !== 'sub_toutiao' && <VideoControls api={api} productionId={id} checks={writes.renderChecks} />}
+            {video && <button type="button" className="button button--secondary wb-render-jump"
+              onClick={() => renderPanel.current?.focus()}><ArrowDown size={15} aria-hidden />前往 Remotion 渲染</button>}
+            {record.need_remotion !== false && record.track_tag !== 'sub_toutiao' && (
+              <details className="wb-legacy-video">
+                <summary><span>旧版视频工具</span>{legacyCheck && !legacyCheck.sending && ' · 待核对'}</summary>
+                <VideoControls api={api} productionId={id} checks={writes.renderChecks} />
+              </details>
+            )}
           </div>
           <DraftGenerationActions api={api} record={record} writes={writes}
             busy={operation !== null || renderingRequest} editorHasContent={Boolean(doc.markdown.trim()) || workbench.dirty}
@@ -302,7 +311,7 @@ function Workbench({ api, id, writes, sessions, onWrite, refreshBoard, topicsPat
           {warnings.length > 0 && <p className="topic-feedback topic-feedback--warning" role="status">
             高危词待核对 · {warnings.join('；')}
           </p>}
-          {video && <div className="wb-remotion"><RenderResults model={render} /></div>}
+          {video && <div ref={renderPanel} tabIndex={-1} className="wb-remotion"><RenderResults model={render} /></div>}
           <footer className="wb-action-footer">
             {renderNotice && <p role={renderNotice.error ? 'alert' : 'status'}>{renderNotice.text}</p>}
             {finalizeReason && <small id={finalizeReasonId}>{finalizeReason}</small>}

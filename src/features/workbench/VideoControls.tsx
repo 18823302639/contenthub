@@ -82,7 +82,7 @@ export function VideoControls({ api, productionId, checks }: {
         <button type="button" className="button button--secondary" disabled={pending || Boolean(check)} aria-busy={pending}
           onClick={() => void generate()}>
           {pending ? <LoaderCircle size={15} className="refresh-spinning" aria-hidden /> : <Video size={15} aria-hidden />}
-          {pending ? '正在拆解分镜并推送渲染...' : '生成视频'}
+          {pending ? '正在拆解分镜并推送渲染...' : '生成视频（旧版）'}
         </button>
       </div>
       {message && (
