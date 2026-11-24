@@ -1,5 +1,6 @@
 """Chromium checks for rendering against intercepted same-origin responses."""
 import argparse
+import hashlib
 import re
 from functools import partial
 from http.server import ThreadingHTTPServer
@@ -358,6 +359,88 @@ def check_cross_origin_download(browser, base, media_file):
         context.close()
 
 
+
+class AttachmentContractMedia(CrossOriginMedia):
+    attachment = CrossOriginMedia.attachment + "?fixture=qa%2Bdownload%3D&extra=1"
+
+
+def check_independent_attachment(browser, base, media_file):
+    context = browser.new_context(viewport={"width": 1440, "height": 900},
+                                  accept_downloads=True, service_workers="block")
+    workflow = AttachmentContractMedia(base, media_file)
+    context.route("**/*", workflow.route)
+    downloads = []
+
+    def record_download(download):
+        downloads.append(download)
+
+    context.on("page", lambda page: page.on("download", record_download))
+    try:
+        page = context.new_page()
+        page.goto(f"{base}/#/workbench/6")
+        panel = page.get_by_role("region", name="渲染状态与成片")
+        playback = panel.get_by_label("成片预览")
+        open_video = panel.get_by_role("link", name="打开视频", exact=True)
+        download = panel.get_by_role("link", name="下载视频", exact=True)
+
+        def reread():
+            refresh = button(panel, "刷新渲染状态")
+            with page.expect_response(lambda response: response.url.endswith(RECORDS + "/6")):
+                refresh.click()
+            expect(refresh).to_be_enabled()
+
+        expect(playback).to_have_attribute("src", workflow.inline)
+        expect(open_video).to_have_attribute("href", workflow.inline)
+        expect(download).to_have_count(0)
+
+        workflow.row.update(video_download_url=workflow.attachment,
+                            video_download_expires_at="2099-01-01T00:00:00Z")
+        reread()
+        expect(download).to_have_attribute("href", workflow.attachment)
+        expect(playback).to_have_attribute("src", workflow.inline)
+        expect(open_video).to_have_attribute("href", workflow.inline)
+        download.click()
+        for _ in range(50):
+            if downloads:
+                break
+            page.wait_for_timeout(100)
+        assert len(downloads) == 1
+        assert downloads[0].suggested_filename == "contenthub-qa.mp4"
+        downloaded = hashlib.sha256(downloads[0].path().read_bytes()).hexdigest()
+        assert downloaded == hashlib.sha256(media_file.read_bytes()).hexdigest()
+        print("PASS 独立附件触发保存且 SHA-256 一致，播放地址与签名原样保留", flush=True)
+
+        workflow.row["video_download_expires_at"] = "2000-01-01T00:00:00Z"
+        reread()
+        expect(download).to_have_count(0)
+        expect(open_video).to_have_attribute("href", workflow.inline)
+        expect(panel.get_by_text(re.compile("下载链接已过期"))).to_be_visible()
+        workflow.row.pop("video_download_url")
+        workflow.row.pop("video_download_expires_at")
+        reread()
+        expect(download).to_have_count(0)
+        expect(open_video).to_have_attribute("href", workflow.inline)
+
+        workflow.row["video_download_url"] = workflow.attachment
+        reread()
+        expect(download).to_have_attribute("href", workflow.attachment)
+        with page.expect_response(lambda response: response.url.endswith(RENDER) and response.request.method == "POST"):
+            button(page, "提交 Remotion 渲染").click()
+        expect(panel.get_by_text("qa-current", exact=True)).to_be_visible()
+        expect(download).to_have_count(0)
+        reread()
+        expect(download).to_have_count(0)
+        new_link = workflow.attachment + "&job=qa-current"
+        workflow.row.update(render_job_id="qa-current", video_download_url=new_link)
+        reread()
+        expect(download).to_have_attribute("href", new_link)
+        expect(playback).to_have_attribute("src", workflow.inline)
+        assert workflow.requests == [{"record_id": 6}] and not workflow.unexpected
+        print("PASS 缺少或过期回退播放，新任务不会展示旧任务附件链接", flush=True)
+    finally:
+        context.close()
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dist", required=True, type=Path)
@@ -371,6 +454,7 @@ def main():
         try:
             base = f"http://127.0.0.1:{server.server_port}"
             with sync_playwright() as playwright, playwright.chromium.launch(chromium_sandbox=True) as browser:
+                check_independent_attachment(browser, base, media_file)
                 check_cross_origin_download(browser, base, media_file)
                 run_unknown_cases(browser, base)
                 check_legacy_submission(browser, base)
