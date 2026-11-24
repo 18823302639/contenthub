@@ -310,4 +310,10 @@ body { min-width: 320px; }
 .production-track-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
 .production-track-tabs [aria-pressed='true'] { background: #efedfc; border-color: #d8d0f4; color: var(--accent); }
 
+.draft-generation { display: grid; gap: 6px; margin-block: 4px 10px; }
+.draft-generation-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+@media (max-width: 767px) {
+  .draft-generation-actions .button { min-height: 44px; }
+}
+
 .topic-delete:not(:disabled):hover { color: #9d2634; background: #fff1f2; }

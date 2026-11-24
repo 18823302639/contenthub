@@ -1,12 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { WriteReadbackError } from '../../api'
 import type { ContentHubApi } from '../../api'
-import { pollWorkflow } from '../../api/workflowPolling'
+import { canRetryEmptyDraft, initialDraftPendingStatus as confirmedStatus, initialDraftRetryAccepted, pollWorkflow } from '../../api/workflowPolling'
 import type { RecordWrites } from '../../app/useRecordWrites'
 import { isWorkflowStatus } from '../../types/schema'
 import type { ProductionItem } from '../../types/schema'
-
-const confirmedStatus = '已确认-待核对'
 
 const messages = {
   saving: '正在保存选题状态…',
@@ -112,11 +110,20 @@ function activityFor(item: ProductionItem, kind: ActivityKind, detail?: string):
   return { kind, title: item.zh_title, detail }
 }
 
+function initialDraftReady(item: ProductionItem) {
+  return Boolean(item.draft_md?.trim()) &&
+    [confirmedStatus, 'AI初稿完成', '初稿已生成', '待人工审核'].includes(item.workflow_status)
+}
+
+function initialDraftPending(item: ProductionItem) {
+  return item.workflow_status === '生成中' || canRetryEmptyDraft(item)
+}
+
 function observeActivity(item: ProductionItem, activity?: TopicActivity): TopicActivity | undefined {
   if (!activity) return undefined
-  if (isWatching(activity) && item.workflow_status === 'AI初稿完成') return activityFor(item, 'ready')
+  if (isWatching(activity) && initialDraftReady(item)) return activityFor(item, 'ready')
   if (isWatching(activity) && item.workflow_status === '已放弃') return activityFor(item, 'abandoned')
-  if (activity.kind === 'waiting' && item.workflow_status !== confirmedStatus) {
+  if (activity.kind === 'waiting' && !initialDraftPending(item)) {
     return activityFor(item, 'watchChanged', `当前记录为「${item.workflow_status}」。`)
   }
   if (activity.kind === 'saveUnverified' || activity.kind === 'readbackFailed' || activity.kind === 'abandonUnverified') {
@@ -163,7 +170,7 @@ export function useTopicBoard(api: ContentHubApi, writes: RecordWrites) {
       for (const item of incoming) {
         if (protectedIds.has(item.id)) continue
         observedAt.current.set(item.id, ticket)
-        if (item.workflow_status !== confirmedStatus) watchers.current.delete(item.id)
+        if (!initialDraftPending(item)) watchers.current.delete(item.id)
       }
       for (const id of watchers.current.keys()) {
         if (!incomingIds.has(id) && !protectedIds.has(id)) watchers.current.delete(id)
@@ -227,10 +234,11 @@ export function useTopicBoard(api: ContentHubApi, writes: RecordWrites) {
           publish(item, 'watchFailed', { detail: error, ticket })
           return true
         }
-        if (latest.workflow_status === confirmedStatus) return false
+        if (initialDraftPending(latest) ||
+            (latest.workflow_status === confirmedStatus && latest.draft_md === item.draft_md)) return false
 
         const observed = { replaceItem: true, ticket }
-        if (latest.workflow_status === 'AI初稿完成') publish(latest, 'ready', observed)
+        if (initialDraftReady(latest)) publish(latest, 'ready', observed)
         else if (latest.workflow_status === '已放弃') publish(latest, 'abandoned', observed)
         else publish(latest, 'watchChanged', { ...observed, detail: `当前记录为「${latest.workflow_status}」。` })
         return true
@@ -238,6 +246,20 @@ export function useTopicBoard(api: ContentHubApi, writes: RecordWrites) {
       if (!finished && active()) publish(item, 'watchPaused')
     } finally {
       if (active()) watchers.current.delete(id)
+    }
+  }
+
+  async function submitFetchDraft(item: ProductionItem, retry = false) {
+    publish(item, 'submitting', { replaceItem: true })
+    try {
+      await api.triggerWebhook('fetch-and-draft', { production_id: item.id })
+    } catch (error) {
+      publish(item, 'webhookUnverified', { detail: message(error) })
+      return
+    }
+    if (mounted.current) {
+      publish(item, 'waiting', { detail: retry ? initialDraftRetryAccepted : undefined })
+      void watchDraft(item)
     }
   }
 
@@ -254,20 +276,24 @@ export function useTopicBoard(api: ContentHubApi, writes: RecordWrites) {
         publish(saved, 'stateChanged', { replaceItem: true })
         return
       }
-      publish(saved, 'submitting', { replaceItem: true })
-
-      try {
-        await api.triggerWebhook('fetch-and-draft', { production_id: item.id })
-      } catch (error) {
-        publish(saved, 'webhookUnverified', { detail: message(error) })
-        return
-      }
-      if (mounted.current) {
-        publish(saved, 'waiting')
-        void watchDraft(saved)
-      }
+      await submitFetchDraft(saved)
     } catch (error) {
       publish(item, error instanceof WriteReadbackError ? 'readbackFailed' : 'saveUnverified', { detail: message(error) })
+    } finally {
+      busy.current.delete(item.id)
+      release()
+    }
+  }
+
+  async function retryDraft(item: ProductionItem) {
+    const activity = state.activities[item.id]
+    if (!canRetryEmptyDraft(item) || busy.current.has(item.id) || isMutationBlocked(activity) ||
+        activity?.kind === 'waiting') return
+    const release = writes.acquire(item.id)
+    if (!release) return
+    busy.current.add(item.id)
+    try {
+      await submitFetchDraft(item, true)
     } finally {
       busy.current.delete(item.id)
       release()
@@ -369,7 +395,7 @@ export function useTopicBoard(api: ContentHubApi, writes: RecordWrites) {
 
   const observeWorkbenchWrite = useCallback((item: ProductionItem) => {
     observedAt.current.set(item.id, ++sequence.current)
-    if (item.workflow_status !== confirmedStatus) watchers.current.delete(item.id)
+    if (!initialDraftPending(item)) watchers.current.delete(item.id)
     setState(current => {
       if (!current.items) return current
       return {
@@ -381,7 +407,7 @@ export function useTopicBoard(api: ContentHubApi, writes: RecordWrites) {
   }, [])
 
   return {
-    ...state, refresh, refreshIfLoaded, ensureLoaded, confirm, generateDraft, abandon, remove,
+    ...state, refresh, refreshIfLoaded, ensureLoaded, confirm, retryDraft, generateDraft, abandon, remove,
     observeWorkbenchWrite, lockedIds: writes.lockedIds,
   }
 }

@@ -1,7 +1,7 @@
 import { ArrowUpRight, LoaderCircle, Star, Trash2 } from 'lucide-react'
 import { useId } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { aiProcessingLabel } from '../../api/workflowPolling'
+import { aiProcessingLabel, canRetryEmptyDraft } from '../../api/workflowPolling'
 import { isWorkflowStatus, productionRiskLabel, productionTracks, wf2Tracks } from '../../types/schema'
 import type { ProductionItem, WorkflowStatus } from '../../types/schema'
 import { externalUrl } from '../../utils/externalUrl'
@@ -36,11 +36,12 @@ export function TopicFeedback({ activity, hidden = false }: { activity: TopicAct
   )
 }
 
-export function TopicCard({ item, activity, writeBusy, onConfirm, onGenerate, onAbandon, onOpen, onDelete }: {
+export function TopicCard({ item, activity, writeBusy, onConfirm, onRetry, onGenerate, onAbandon, onOpen, onDelete }: {
   item: ProductionItem
   activity?: TopicActivity
   writeBusy: boolean
   onConfirm: (item: ProductionItem) => Promise<void>
+  onRetry: (item: ProductionItem) => Promise<void>
   onGenerate: (item: ProductionItem) => Promise<void>
   onOpen: (id: number, opener: HTMLButtonElement) => void
   onAbandon: (item: ProductionItem) => Promise<void>
@@ -56,6 +57,7 @@ export function TopicCard({ item, activity, writeBusy, onConfirm, onGenerate, on
   const wf2 = wf2Tracks.some(track => track === item.track_tag)
   const generating = isGeneratingDraft(activity) || item.workflow_status === '生成中'
   const draftExists = hasDraft(item)
+  const retryEmpty = canRetryEmptyDraft(item)
   const title = item.zh_title.trim() || item.raw_title.trim() || '未命名选题'
 
   return (
@@ -83,7 +85,7 @@ export function TopicCard({ item, activity, writeBusy, onConfirm, onGenerate, on
       </div>
       {activity && <TopicFeedback activity={activity} />}
       <div className="topic-actions">
-        {wf2 ? (
+        {wf2 && !retryEmpty ? (
           <button type="button" className="button button--primary" disabled={blocked || generating || !canGenerateDraft(item)}
             aria-busy={generating} onClick={() => {
               if (!draftExists || window.confirm('重新生成可能覆盖当前初稿、口播稿和渲染数据。确定继续吗？')) void onGenerate(item)
@@ -91,7 +93,7 @@ export function TopicCard({ item, activity, writeBusy, onConfirm, onGenerate, on
             {generating && <LoaderCircle size={15} className="refresh-spinning" aria-hidden />}
             {generating ? '生成中…' : draftExists ? '重新生成' : '生成初稿'}
           </button>
-        ) : activity?.kind === 'waiting' ? (
+        ) : !retryEmpty && activity?.kind === 'waiting' ? (
           <button type="button" className="button button--primary" disabled aria-busy="true">
             <LoaderCircle size={15} className="refresh-spinning" aria-hidden />{aiProcessingLabel}
           </button>
@@ -102,6 +104,15 @@ export function TopicCard({ item, activity, writeBusy, onConfirm, onGenerate, on
         )}
         <button type="button" className="button button--secondary" disabled={generating || writeBusy}
           onClick={event => onOpen(item.id, event.currentTarget)}>打开工作台</button>
+        {retryEmpty && (
+          <button type="button" className="button button--secondary" disabled={blocked || generating || activity?.kind === 'waiting'}
+            aria-busy={activity?.kind === 'submitting' || activity?.kind === 'waiting'} onClick={() => void onRetry(item)}>
+            {(activity?.kind === 'submitting' || activity?.kind === 'waiting') &&
+              <LoaderCircle size={15} className="refresh-spinning" aria-hidden />}
+            {activity?.kind === 'waiting' ? aiProcessingLabel
+              : activity?.kind === 'submitting' ? '正在触发初稿生成…' : '重试生成初稿'}
+          </button>
+        )}
         {!wf2 && <Link className="button button--secondary" to={`/workbench/${item.id}`} state={{ topicsSearch: search }}>进入改稿台</Link>}
         {canAbandon(item) && (
           <button className="button button--quiet" disabled={blocked} onClick={() => void onAbandon(item)}>放弃</button>

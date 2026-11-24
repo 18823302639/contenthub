@@ -7,6 +7,7 @@ import type { ProductionItem } from '../../types/schema'
 import { renderMarkdownHtml } from '../workbench/MarkdownPreview'
 import { useUnsavedChanges } from '../../app/UnsavedChanges'
 import { requestAiDraft } from '../workbench/requestAiDraft'
+import { DraftGenerationActions } from '../workbench/DraftGenerationActions'
 import { editorialWarnings, needsRemotion, renderDataWarning, renderRecordIsCurrent, reviewIssue } from './editingRules'
 import { RenderResults, useRenderResults } from './RenderResults'
 import { EditorialPanels } from '../workbench/EditorTabs'
@@ -94,8 +95,7 @@ function DeskEditor({ api, record: initial, writes, onSaved, requestClose, regis
     (!values.title.trim() || !values.article.trim() ? '定稿需要中文标题和图文正文。' : null)
   const renderReason = approvalIssue || parsed.error ||
     (productionRiskLabel(record.compliance_risk) === '高风险' ? '请先用人工复核操作保存低风险等级。' : null) ||
-    (changed ? '请先保存当前草稿和渲染数据。' : null) ||
-    (render.phase === 'rendering' ? '已在渲染，请等待本次结果。' : null)
+    (changed ? '请先保存当前草稿和渲染数据。' : null)
   const writeRemotion = main || remotionChanged
   const saveDisabled = busy || (writeRemotion && Boolean(parsed.error))
   const seconds = Math.ceil(length(values.script) * 60 / 260)
@@ -158,6 +158,20 @@ function DeskEditor({ api, record: initial, writes, onSaved, requestClose, regis
     }
   }
 
+  async function refreshDraft() {
+    const latest = await api.getProductionItem(record.id)
+    if (latest.id !== record.id) throw new Error('读取结果与当前选题不一致。')
+    const next = fields(latest)
+    setValues(current => ({
+      title: current.title === original.title ? next.title : current.title,
+      article: current.article === original.article ? next.article : current.article,
+      script: current.script === original.script ? next.script : current.script,
+      remotion: current.remotion === original.remotion ? next.remotion : current.remotion,
+    }))
+    setRecord(latest)
+    onSaved(latest)
+  }
+
   async function renderVideo() {
     if (!main || renderReason || busy) return
     const release = writes.acquire(record.id)
@@ -171,6 +185,7 @@ function DeskEditor({ api, record: initial, writes, onSaved, requestClose, regis
         setNotice({ text: '记录已更新或不满足渲染条件。请核对风险等级和已保存的渲染数据。', error: true })
         return
       }
+      if (!render.confirmSubmission(latest)) return
       await api.triggerRender(record.id)
       render.accepted(latest)
       setNotice({ text: 'Remotion 渲染请求已受理' })
@@ -228,6 +243,8 @@ function DeskEditor({ api, record: initial, writes, onSaved, requestClose, regis
           )}
         </div>
 
+        <DraftGenerationActions api={api} record={record} writes={writes} busy={operation !== null}
+          editorHasContent={Boolean(values.article.trim()) || changed} refresh={refreshDraft} manualRefresh />
         <EditorialPanels group={group} value={tab} select={selectTab} tabsClassName="desk-tabs" panelClassName="desk-panel">
           {tab === 'article' && (
             <>
@@ -305,7 +322,7 @@ function DeskEditor({ api, record: initial, writes, onSaved, requestClose, regis
             <span title={renderReason ?? undefined} tabIndex={renderReason ? 0 : undefined}
               aria-describedby={renderReason ? (renderReason === finalizeReason ? finalizeReasonId : renderReasonId) : undefined}>
               <button type="button" className="button button--secondary" disabled={busy || Boolean(renderReason)}
-                onClick={() => void renderVideo()}>{operation === 'render' ? '正在提交…' : '提交 Remotion 渲染'}</button>
+                onClick={() => void renderVideo()}>{operation === 'render' ? '正在提交…' : render.submitLabel}</button>
             </span>
           )}
         </div>

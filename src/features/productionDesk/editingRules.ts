@@ -38,8 +38,7 @@ export function renderDataWarning(parsed: ReturnType<typeof parseRemotion>) {
 export function renderRecordIsCurrent(current: ProductionItem, latest: ProductionItem, parsed: ReturnType<typeof parseRemotion>) {
   const data = parseRemotion(remotionText(latest.remotion_data))
   const fields = ['zh_title', 'draft_md', 'final_md', 'final_content', 'video_script'] as const
-  const active = ['queued', 'rendering', '排队中', '渲染中'].includes(latest.render_status?.trim().toLowerCase() ?? '')
-  return latest.id === current.id && needsRemotion(latest) && !active &&
+  return latest.id === current.id && needsRemotion(latest) &&
     productionRiskLabel(latest.compliance_risk) !== '高风险' && !data.error &&
     sameRemotion(data.value, parsed.value) && fields.every(field => latest[field] === current[field])
 }

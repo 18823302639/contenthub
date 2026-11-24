@@ -1,3 +1,4 @@
+import { canRequestInitialDraft } from './workflowPolling'
 import { dailyMetricKey } from '../utils/metricDays'
 import type { ProductionItem } from '../types/schema'
 import type { RecordStore, TableName, Tables, WebhookReceipt, WebhookRequest } from './contracts'
@@ -13,6 +14,7 @@ function delay() {
 export function createMockBackend() {
   const data = makeMockData(Date.now())
   const activeJobs = new Set<number>()
+  const activeRenderJobs = new Set<number>()
   let nextVideoJobId = 1
   let collecting = false
 
@@ -109,8 +111,8 @@ export function createMockBackend() {
       }
     }
 
-    if (action === 'fetch-and-draft' && item.workflow_status !== '已确认-待核对') {
-      throw new Error('请先确认选题，再触发模拟初稿。')
+    if (action === 'fetch-and-draft' && !canRequestInitialDraft(item)) {
+      throw new Error('当前状态无法生成初稿。')
     }
     if (action === 'rewrite-draft' && (
       item.workflow_status !== '需AI润色' ||
@@ -172,9 +174,11 @@ export function createMockBackend() {
   async function triggerRender(id: number): Promise<WebhookReceipt> {
     await delay()
     const item = find('production_pool', id)
-    if (['queued', 'rendering'].includes(item.render_status ?? '')) throw new Error('已有模拟渲染任务。')
+    if (activeRenderJobs.has(id)) throw new Error('已有模拟渲染任务。')
+    activeRenderJobs.add(id)
     updateProduction(item, { render_status: 'rendering', render_error: '', video_url: '', cards_urls: [] })
     setTimeout(() => {
+      activeRenderJobs.delete(id)
       const latest = data.production_pool.find(row => row.id === id)
       if (latest) updateProduction(latest, { render_status: 'completed' })
     }, workflowDelayMs)

@@ -1,4 +1,16 @@
 import type { ContentHubApi } from './contracts'
+import type { ProductionItem } from '../types/schema'
+
+export const initialDraftPendingStatus = '已确认-待核对'
+export const initialDraftRetryAccepted = '已重新触发初稿生成'
+
+export function canRetryEmptyDraft(record: ProductionItem) {
+  return record.workflow_status === initialDraftPendingStatus && !record.draft_md?.trim()
+}
+
+export function canRequestInitialDraft(record: ProductionItem) {
+  return !['生成中', '需AI润色', '已发布', '已放弃'].includes(record.workflow_status)
+}
 
 export const aiProcessingLabel = 'AI 处理中，约需 40–60 秒…'
 

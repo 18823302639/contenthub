@@ -3,7 +3,7 @@ import type { RecordWrites } from '../../app/useRecordWrites'
 import { isWorkflowStatus } from '../../types/schema'
 import { WriteReadbackError } from '../../api'
 import type { ContentHubApi } from '../../api'
-import { pollWorkflow } from '../../api/workflowPolling'
+import { initialDraftPendingStatus, pollWorkflow } from '../../api/workflowPolling'
 import type { ProductionItem } from '../../types/schema'
 import { needsRemotion } from '../productionDesk/editingRules'
 import { parseRemotion, remotionText, remotionWriteValue, sameRemotion } from '../productionDesk/remotion'
@@ -111,6 +111,9 @@ function isRewriteReview(record: ProductionItem, expected: PendingJob) {
 }
 
 function awaitingResult(record: ProductionItem, expected: PendingJob) {
+  if (expected.status === initialDraftPendingStatus && expected.receipt === 'accepted') {
+    return !expected.loadedDraft && !['已放弃', '已发布'].includes(record.workflow_status)
+  }
   const changedFinal = Boolean(record.final_md?.trim()) && record.final_md !== expected.finalBefore
   return matchesPending(record, expected) || (
     expected.receipt !== 'notSent' && isRewriteReview(record, expected) &&
@@ -119,6 +122,13 @@ function awaitingResult(record: ProductionItem, expected: PendingJob) {
 }
 
 function changedDraft(record: ProductionItem, expected: PendingJob | null) {
+  if (expected?.status === initialDraftPendingStatus && expected.receipt === 'accepted') {
+    if (['已放弃', '已发布'].includes(record.workflow_status) ||
+        !record.draft_md?.trim() || record.draft_md === expected.draftBefore) return null
+    expected.draftBefore = record.draft_md
+    expected.loadedDraft = true
+    return record.draft_md
+  }
   if (expected?.status !== rewriteStatus || expected.receipt === 'notSent' ||
     (record.revision_note ?? '') !== expected.note ||
     (record.workflow_status !== rewriteStatus && record.workflow_status !== '待人工终审') ||
@@ -234,7 +244,7 @@ export function useWorkbench(
     session.job = null
     if (expected.receipt === 'notSent') {
       display('已读取最新记录。本次未发送 Webhook。')
-    } else if (expected.status === '已确认-待核对' && record.workflow_status === 'AI初稿完成') {
+    } else if (expected.status === initialDraftPendingStatus && (expected.loadedDraft || record.workflow_status === 'AI初稿完成')) {
       display('初稿已回写。')
     } else if (isRewriteReview(record, expected)) {
       const text = expected.loadedDraft ? '改稿结果已回写，已加载最新初稿。' : '改稿结果已回写。'
@@ -298,7 +308,7 @@ export function useWorkbench(
     display(prefix + next + errorMessage(error), true)
   }
 
-  async function refresh() {
+  async function refresh(restartDraftWatch = false) {
     await run('reading', async () => {
       session.generation++
       setWatching(false)
@@ -306,7 +316,9 @@ export function useWorkbench(
       try {
         const latest = await read()
         if (!live.current) return
-        const expected = session.job ?? pendingJob(latest)
+        const expected: PendingJob | null = restartDraftWatch
+          ? { status: initialDraftPendingStatus, receipt: 'accepted', draftBefore: session.document?.record.draft_md ?? '' }
+          : session.job ?? pendingJob(latest)
         observeRead(latest, changedDraft(latest, expected))
         setNeedsRead(false)
         if (!doc) setNote(latest.revision_note ?? '')
@@ -318,7 +330,9 @@ export function useWorkbench(
             display('记录仍为「需AI润色」。本次未发送 Webhook，请核对工作流。', true)
             return
           }
-          if (expected.receipt === 'accepted') display(rewriteAccepted)
+          if (expected.receipt === 'accepted') {
+            display(expected.status === initialDraftPendingStatus ? 'Webhook 已受理，等待初稿回写。' : rewriteAccepted)
+          }
           else if (expected.receipt === 'unconfirmed') {
             display('修改意见已保存，但 Webhook 受理未确认。请核对执行记录。', true)
           } else {

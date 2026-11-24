@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { createMemoryRouter, RouterProvider } from 'react-router-dom'
 import { afterEach, expect, it, vi } from 'vitest'
 import type { ContentHubApi } from '../src/api'
@@ -58,7 +58,7 @@ it('改稿队列按更新时间排序，URL 参数优先于本地记录并排除
   const queue = within(screen.getByRole('complementary', { name: '待改稿列表' }))
   expect(queue.getAllByRole('link').map(link => link.querySelector('strong')?.textContent))
     .toEqual(['更新的稿件', '第一份稿件'])
-  expect(window.localStorage.getItem('contenthub.lastWorkbenchId')).toBe('1')
+  await waitFor(() => expect(window.localStorage.getItem('contenthub.lastWorkbenchId')).toBe('1'))
 })
 
 it('无有效 URL 时优先选上次稿件，切换和浏览器返回时会保护未保存编辑', async () => {
@@ -269,4 +269,78 @@ it('精修 Tab 有独立面板且空白 Remotion 不禁用原有定稿和渲染�
   fireEvent.click(render)
   await screen.findByText('Remotion 渲染请求已受理')
   expect(trigger).toHaveBeenCalledExactlyOnceWith(1)
+})
+
+it('独立改稿台可从已确认的空稿直接重试并读取新初稿', async () => {
+  const pending: ProductionItem = { ...row, workflow_status: '已确认-待核对', draft_md: '  ' }
+  const rows = [pending]
+  const api = fixture(rows)
+  const trigger = vi.spyOn(api, 'triggerWebhook').mockImplementation(async () => {
+    rows[0] = { ...pending, workflow_status: 'AI初稿完成', draft_md: '重新生成的正文' }
+    return { accepted: true, status: 202 }
+  })
+  mount(api, '/workbench?id=1')
+  expect((await editor()).value.trim()).toBe('')
+  fireEvent.click(screen.getByRole('button', { name: '生成初稿' }))
+  await screen.findByText('已重新触发初稿生成')
+  expect((await editor()).value).toBe('重新生成的正文')
+  expect(trigger).toHaveBeenCalledExactlyOnceWith('fetch-and-draft', { production_id: 1 })
+})
+
+it('改稿台重新生成已有正文时先确认，取消保留编辑', async () => {
+  const api = fixture()
+  const trigger = vi.spyOn(api, 'triggerWebhook').mockResolvedValue({ accepted: true, status: 202 })
+  const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true)
+  mount(api, '/workbench?id=1')
+  const draft = await editor()
+  fireEvent.change(draft, { target: { value: '尚未保存的人工内容' } })
+  fireEvent.click(screen.getByRole('button', { name: '重新生成初稿' }))
+  expect(confirm).toHaveBeenCalledTimes(1)
+  expect(trigger).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole('button', { name: '重新生成初稿' }))
+  await screen.findByText('已重新触发初稿生成')
+  expect(trigger).toHaveBeenCalledExactlyOnceWith('fetch-and-draft', { production_id: 1 })
+  expect((await editor()).value).toBe('尚未保存的人工内容')
+})
+
+it('服务端仍显示渲染中时，改稿台可刷新并在确认后重新提交', async () => {
+  const api = fixture([{ ...row, render_status: 'rendering' }])
+  const trigger = vi.spyOn(api, 'triggerRender').mockResolvedValue({ accepted: true, status: 202 })
+  const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true)
+  mount(api, '/workbench?id=1')
+  await editor()
+  const results = within(screen.getByRole('region', { name: '渲染状态与成片' }))
+  fireEvent.click(results.getByRole('button', { name: '刷新渲染状态' }))
+  expect(api.getProductionItem).toHaveBeenCalledTimes(2)
+  const retry = screen.getByRole<HTMLButtonElement>('button', { name: '重试 Remotion 渲染' })
+  expect(retry.disabled).toBe(false)
+  fireEvent.click(retry)
+  await act(async () => {})
+  expect(confirm).toHaveBeenCalledTimes(1)
+  expect(trigger).not.toHaveBeenCalled()
+  fireEvent.click(retry)
+  await screen.findByText('Remotion 渲染请求已受理')
+  expect(trigger).toHaveBeenCalledExactlyOnceWith(1)
+})
+
+it('重提渲染后旧的刷新请求不锁住新任务，也不展示旧成片', async () => {
+  const pending = { ...row, render_status: 'rendering' }
+  const api = fixture([pending])
+  let resolveOldRead!: (record: ProductionItem) => void
+  const oldRead = new Promise<ProductionItem>(resolve => { resolveOldRead = resolve })
+  vi.mocked(api.getProductionItem).mockResolvedValueOnce(pending).mockReturnValueOnce(oldRead)
+  vi.spyOn(api, 'triggerRender').mockResolvedValue({ accepted: true, status: 202 })
+  vi.spyOn(window, 'confirm').mockReturnValue(true)
+  mount(api, '/workbench?id=1')
+  await editor()
+  const results = within(screen.getByRole('region', { name: '渲染状态与成片' }))
+  const refresh = results.getByRole<HTMLButtonElement>('button', { name: '刷新渲染状态' })
+  fireEvent.click(refresh)
+  expect(refresh.disabled).toBe(true)
+  fireEvent.click(screen.getByRole('button', { name: '重试 Remotion 渲染' }))
+  await screen.findByText('Remotion 渲染请求已受理')
+  expect(refresh.disabled).toBe(false)
+  await act(async () => resolveOldRead({ ...pending, render_status: 'completed', video_url: '/old.mp4' }))
+  expect(results.getByText('渲染状态 · 渲染中')).toBeTruthy()
+  expect(results.queryByRole('link', { name: '下载视频' })).toBeNull()
 })

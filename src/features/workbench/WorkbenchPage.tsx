@@ -19,6 +19,7 @@ import { needsRemotion, editorialWarnings, renderDataWarning, renderRecordIsCurr
 import { remotionText } from '../productionDesk/remotion'
 import { RenderResults, useRenderResults } from '../productionDesk/RenderResults'
 import { VideoControls } from './VideoControls'
+import { DraftGenerationActions } from './DraftGenerationActions'
 import { useWorkbench } from './useWorkbench'
 import type { WorkbenchSession } from './useWorkbench'
 import './workbench.css'
@@ -159,8 +160,7 @@ function Workbench({ api, id, writes, sessions, onWrite, refreshBoard, topicsPat
     (!record?.zh_title.trim() || !doc?.markdown.trim() ? '定稿需要中文标题和图文正文。' : null)
   const renderReason = reviewReason || parsed.error ||
     (productionRiskLabel(record?.compliance_risk ?? '') === '高风险' ? '请先用人工复核操作保存低风险等级。' : null) ||
-    (workbench.dirty ? '请先保存草稿和渲染数据。' : null) ||
-    (render.phase === 'rendering' ? '已在渲染，请等待本次结果。' : null)
+    (workbench.dirty ? '请先保存草稿和渲染数据。' : null)
   useUnsavedChanges(workbench.dirty || markLow)
   useEffect(() => { if (record) rememberWorkbench(record.id) }, [record])
   const noteId = useId()
@@ -183,6 +183,7 @@ function Workbench({ api, id, writes, sessions, onWrite, refreshBoard, topicsPat
       if (!renderRecordIsCurrent(record, latest, parsed)) {
         throw new Error('记录已变更或不满足渲染条件，请刷新记录核对。')
       }
+      if (!render.confirmSubmission(latest)) return
       await api.triggerRender(id)
       render.accepted(latest)
       setRenderNotice({ text: 'Remotion 渲染请求已受理' })
@@ -203,7 +204,7 @@ function Workbench({ api, id, writes, sessions, onWrite, refreshBoard, topicsPat
         </div>
         <div className="wb-header-actions">
           <Link className="button button--quiet" to={topicsPath}><ArrowLeft size={15} aria-hidden />返回选题看板</Link>
-          <button className="button button--secondary" disabled={operation !== null} onClick={() => void workbench.refresh()}>
+          <button className="button button--secondary" disabled={operation !== null || writes.lockedIds.has(id)} onClick={() => void workbench.refresh()}>
             <RefreshCw size={15} aria-hidden />刷新记录
           </button>
         </div>
@@ -270,6 +271,9 @@ function Workbench({ api, id, writes, sessions, onWrite, refreshBoard, topicsPat
             </div>
             {record.need_remotion !== false && record.track_tag !== 'sub_toutiao' && <VideoControls api={api} productionId={id} />}
           </div>
+          <DraftGenerationActions api={api} record={record} writes={writes}
+            busy={operation !== null || renderingRequest} editorHasContent={Boolean(doc.markdown.trim()) || workbench.dirty}
+            refresh={workbench.refresh} />
           <EditorialPanels group={contentId} value={contentTab} select={setContentTab}
             tabsClassName="wb-tabs wb-content-tabs" panelClassName="wb-content-panel">
             {contentTab === 'article' && <div className="wb-grid">
@@ -326,7 +330,7 @@ function Workbench({ api, id, writes, sessions, onWrite, refreshBoard, topicsPat
                 })}>人工复核通过并定稿</button>
               {video && <button type="button" className="button button--secondary" disabled={Boolean(renderReason) || renderingRequest || operation !== null || writes.lockedIds.has(id)}
                 aria-describedby={renderReason ? (renderReason === finalizeReason ? finalizeReasonId : renderReasonId) : undefined}
-                onClick={() => void submitRender()}>{renderingRequest ? '正在提交…' : '提交 Remotion 渲染'}</button>}
+                onClick={() => void submitRender()}>{renderingRequest ? '正在提交…' : render.submitLabel}</button>}
             </div>
           </footer>
         </>

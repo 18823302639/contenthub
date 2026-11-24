@@ -38,7 +38,7 @@ describe('选题看板', () => {
     const pending = { ...items[0], workflow_status: '已确认-待核对' }
     vi.spyOn(api, 'listProductionItems').mockResolvedValue(items)
     vi.spyOn(api, 'updateProductionItem').mockResolvedValue(pending)
-    vi.spyOn(api, 'triggerWebhook').mockResolvedValue({ accepted: true, status: 202 })
+    const trigger = vi.spyOn(api, 'triggerWebhook').mockResolvedValue({ accepted: true, status: 202 })
     let releaseLast!: (record: ProductionItem) => void
     const lastRead = new Promise<ProductionItem>(resolve => { releaseLast = resolve })
     const read = vi.spyOn(api, 'getProductionItem').mockImplementation(() => (
@@ -62,6 +62,11 @@ describe('选题看板', () => {
     expect(row.queryByRole('button', { name: /AI 处理中/ })).toBeNull()
     await act(async () => releaseLast({ ...pending, workflow_status: 'AI初稿完成' }))
     expect(row.queryByText('AI初稿完成')).toBeNull()
+    await act(async () => fireEvent.click(row.getByRole('button', { name: '重试生成初稿' })))
+    expect(trigger.mock.calls).toEqual([
+      ['fetch-and-draft', { production_id: 1 }],
+      ['fetch-and-draft', { production_id: 1 }],
+    ])
   })
 
   it('未知选题标签用灰色展示，可用原始值筛选且不执行未知状态的流转', async () => {
@@ -304,4 +309,19 @@ it('删除接口失败时保留选题和总数，提示刷新核对', async () =
   expect(remove).toHaveBeenCalledExactlyOnceWith(1)
   expect(screen.getByText('当前总选题数：7 条')).toBeTruthy()
   expect(screen.getByRole('article', { name: retail })).toBeTruthy()
+})
+
+it('已确认且没有正文的卡片直接重试，不重写确认状态', async () => {
+  const api = createContentHubApi({})
+  await api.updateProductionItem(1, { workflow_status: '已确认-待核对', draft_md: '  ' })
+  const patch = vi.spyOn(api, 'updateProductionItem')
+  const trigger = vi.spyOn(api, 'triggerWebhook')
+  openApp(api)
+  const item = within(await card(retail))
+  fireEvent.click(item.getByRole('button', { name: '重试生成初稿' }))
+  await item.findByText('已重新触发初稿生成')
+  expect(trigger).toHaveBeenCalledExactlyOnceWith('fetch-and-draft', { production_id: 1 })
+  expect(patch).not.toHaveBeenCalled()
+  await item.findByText('初稿已回写。', {}, { timeout: 3000 })
+  expect(item.queryByRole('button', { name: '重试生成初稿' })).toBeNull()
 })

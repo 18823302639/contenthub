@@ -3,8 +3,9 @@ import { useEffect, useId, useState } from 'react'
 import { Link } from 'react-router-dom'
 import type { To } from 'react-router-dom'
 import type { ProductionItem } from '../../types/schema'
+import { initialDraftPendingStatus } from '../../api/workflowPolling'
 
-const editableStatuses = new Set(['AI初稿完成', '初稿已生成', '需AI润色', '精修中', '待人工审核', '待人工终审', '已定稿'])
+const editableStatuses = new Set([initialDraftPendingStatus, '生成中', 'AI初稿完成', '初稿已生成', '需AI润色', '精修中', '待人工审核', '待人工终审', '已定稿'])
 const lastEditedKey = 'contenthub.lastWorkbenchId'
 
 export function lastWorkbenchId() {

@@ -186,7 +186,7 @@ export function TopicsPage({ api, board, writes, rssSync }: {
               <div className="topic-grid">
                 {pageItems.map(item => (
                   <TopicCard key={item.id} item={item} activity={activities[item.id]} writeBusy={board.lockedIds.has(item.id)}
-                    onConfirm={board.confirm} onGenerate={board.generateDraft} onAbandon={board.abandon} onDelete={board.remove}
+                    onConfirm={board.confirm} onRetry={board.retryDraft} onGenerate={board.generateDraft} onAbandon={board.abandon} onDelete={board.remove}
                     onOpen={(id, opener) => setDesk({ id, opener })} />
                 ))}
               </div>

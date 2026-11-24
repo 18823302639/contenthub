@@ -48,6 +48,7 @@ export function useRenderResults(api: ContentHubApi, record: ProductionItem | un
   const [error, setError] = useState<string | null>(null)
   const live = useRef(true)
   const busy = useRef(false)
+  const readVersion = useRef(0)
   const id = record?.id
   const phase = tracker && (tracker.previous !== undefined ? 'rendering' : phaseOf(tracker.record.render_status))
 
@@ -62,17 +63,24 @@ export function useRenderResults(api: ContentHubApi, record: ProductionItem | un
   const refresh = useCallback(async () => {
     if (!enabled || id === undefined || busy.current) return
     busy.current = true
+    const version = ++readVersion.current
     setReading(true)
     setError(null)
     try {
       const latest = await api.getProductionItem(id)
       if (latest.id !== id) throw new Error('返回记录与当前稿件不一致。')
-      if (live.current) setTracker(current => current ? observe(current, latest) : { record: latest, previous: undefined })
+      if (live.current && readVersion.current === version) {
+        setTracker(current => current ? observe(current, latest) : { record: latest, previous: undefined })
+      }
     } catch (cause) {
-      if (live.current) setError('渲染状态读取失败，可重试。' + (cause instanceof Error ? cause.message : ''))
+      if (live.current && readVersion.current === version) {
+        setError('渲染状态读取失败，可重试。' + (cause instanceof Error ? cause.message : ''))
+      }
     } finally {
-      busy.current = false
-      if (live.current) setReading(false)
+      if (readVersion.current === version) {
+        busy.current = false
+        if (live.current) setReading(false)
+      }
     }
   }, [api, id, enabled])
 
@@ -83,11 +91,20 @@ export function useRenderResults(api: ContentHubApi, record: ProductionItem | un
   }, [enabled, phase, refresh])
 
   function accepted(baseline: ProductionItem) {
+    readVersion.current++
+    busy.current = false
+    setReading(false)
     setError(null)
     setTracker({ record: baseline, previous: fingerprint(baseline) })
   }
 
-  return { record: tracker?.record, phase: phase || 'idle', refresh, reading, error, accepted }
+  function confirmSubmission(latest: ProductionItem) {
+    const inProgress = phase === 'rendering' || phaseOf(latest.render_status) === 'rendering'
+    return !inProgress || window.confirm('任务仍显示渲染中，重新提交可能产生重复任务。确定重试吗？')
+  }
+
+  const submitLabel = phase === 'rendering' || phase === 'failed' ? '重试 Remotion 渲染' : '提交 Remotion 渲染'
+  return { record: tracker?.record, phase: phase || 'idle', refresh, reading, error, accepted, confirmSubmission, submitLabel }
 }
 
 const states: Record<RenderPhase, string> = { idle: '未开始', rendering: '渲染中', completed: '已完成', failed: '失败' }
