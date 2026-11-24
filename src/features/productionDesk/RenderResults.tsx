@@ -24,6 +24,11 @@ function fingerprint(record: ProductionItem) {
 
 function observe(current: Tracker, record: ProductionItem): Tracker {
   const phase = phaseOf(record.render_status)
+  if (current.previous === undefined && record.render_job_id && record.render_job_id === current.record.render_job_id) {
+    const previousPhase = phaseOf(current.record.render_status)
+    if ((previousPhase === 'completed' || previousPhase === 'failed') && phase !== previousPhase) return current
+    if (previousPhase === 'completed' && mediaUrl(current.record.video_url) && !mediaUrl(record.video_url)) return current
+  }
   if (current.jobId) {
     if (record.render_job_id !== current.jobId || (current.previous !== undefined && phase === 'idle')) return current
     return { record, previous: undefined, jobId: current.jobId }
