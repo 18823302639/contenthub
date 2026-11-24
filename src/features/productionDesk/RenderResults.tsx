@@ -55,6 +55,26 @@ function mediaUrl(value: string | undefined) {
   }
 }
 
+function sameOrigin(url: string) {
+  return new URL(url, window.location.href).origin === window.location.origin
+}
+
+function downloadExpiry(url: string, declared: string | undefined) {
+  const explicit = Date.parse(declared?.replace(' ', 'T') ?? '')
+  const params = new URL(url, window.location.href).searchParams
+  const stamp = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/.exec(params.get('X-Amz-Date') ?? '')
+  const duration = params.get('X-Amz-Expires') ?? ''
+  let signed = Infinity
+  if (stamp && /^\d{1,6}$/.test(duration) && Number(duration) <= 604_800 && params.has('X-Amz-Signature')) {
+    const [, year, month, day, hours, minutes, seconds] = stamp
+    const date = year + '-' + month + '-' + day + 'T' + hours + ':' + minutes + ':' + seconds + '.000Z'
+    const start = Date.parse(date)
+    if (Number.isFinite(start) && new Date(start).toISOString() === date) signed = start + Number(duration) * 1000
+  }
+  const expiry = Math.min(Number.isFinite(explicit) ? explicit : Infinity, signed)
+  return Number.isFinite(expiry) ? expiry : undefined
+}
+
 export function useRenderResults(api: ContentHubApi, record: ProductionItem | undefined, enabled: boolean, checks?: RenderSubmissionChecks) {
   const [tracker, setTracker] = useState<Tracker | null>(() => record ? { record, previous: undefined } : null)
   const [reading, setReading] = useState(false)
@@ -163,10 +183,27 @@ export function RenderResults({ model }: { model: ReturnType<typeof useRenderRes
   const [copy, setCopy] = useState('')
   const { phase, record, jobId, reading, refresh, error, blocked } = model
   const video = phase === 'completed' ? mediaUrl(record?.video_url) : null
-  const sameOriginVideo = video !== null && new URL(video, window.location.href).origin === window.location.origin
+  const candidate = phase === 'completed' ? mediaUrl(record?.video_download_url) : null
+  const attachment = candidate === video ? null : candidate
+  const expiry = attachment ? downloadExpiry(attachment, record?.video_download_expires_at) : undefined
+  const [now, setNow] = useState(Date.now)
+  const expired = expiry !== undefined && now >= expiry
+  const download = (!expired && attachment) || (video && sameOrigin(video) ? video : null)
   const cardUrls = (record?.cards_urls ?? []).map(mediaUrl).filter((url): url is string => url !== null)
   const cards = phase === 'completed' ? [...new Set(cardUrls)] : []
   const [copySource, setCopySource] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (expiry === undefined) return
+    let timer: number | undefined
+    function schedule(deadline: number) {
+      const checkedAt = Date.now()
+      setNow(checkedAt)
+      if (deadline > checkedAt) timer = window.setTimeout(() => schedule(deadline), Math.min(deadline - checkedAt, 2_147_483_647))
+    }
+    schedule(expiry)
+    return () => window.clearTimeout(timer)
+  }, [expiry])
 
   return <section className="render-results" aria-label="渲染状态与成片">
     <div className="render-results-head">
@@ -184,14 +221,23 @@ export function RenderResults({ model }: { model: ReturnType<typeof useRenderRes
     {phase === 'failed' && <p role="alert" className="topic-feedback topic-feedback--warning">
       {record?.render_error || '渲染失败，服务端未提供原因。'} 可以重新提交。
     </p>}
-    {phase === 'completed' && !video && <p className="results-count">渲染已完成，暂未提供可用的视频地址。</p>}
-    {video && <>
-      <video src={video} controls preload="none" playsInline aria-label="成片预览" />
-      <div className="render-results-head">
-        <a className="button button--secondary" href={video} target="_blank" rel="noopener noreferrer" download={sameOriginVideo}>
-          {sameOriginVideo ? <><Download size={15} aria-hidden />下载视频</>
-            : <><ArrowUpRight size={15} aria-hidden />打开视频</>}
-        </a>
+    {phase === 'completed' && !video && !download && <p className="results-count">渲染已完成，暂未提供可用的视频地址。</p>}
+    {video && <video src={video} controls preload="none" playsInline aria-label="成片预览" />}
+    {(video || download) && <div className="render-results-head">
+      {video && video !== download && <a className="button button--secondary" href={video} target="_blank" rel="noopener noreferrer">
+        <ArrowUpRight size={15} aria-hidden />打开视频
+      </a>}
+      {download && <a className="button button--secondary" href={download} target="_blank" rel="noopener noreferrer"
+        download={sameOrigin(download)} onClick={event => {
+          const clickedAt = Date.now()
+          if (download === attachment && expiry !== undefined && clickedAt >= expiry) {
+            event.preventDefault()
+            setNow(clickedAt)
+          }
+        }}>
+        <Download size={15} aria-hidden />下载视频
+      </a>}
+      {video && <>
         <button type="button" className="button button--secondary" onClick={async () => {
           setCopySource(video)
           try {
@@ -202,9 +248,10 @@ export function RenderResults({ model }: { model: ReturnType<typeof useRenderRes
           }
         }}><Copy size={15} aria-hidden />复制视频链接</button>
         {copySource === video && <span role="status">{copy}</span>}
-      </div>
-      {!sameOriginVideo && <p className="results-count">跨域视频在新标签页打开，是否自动保存由视频服务决定。</p>}
-    </>}
+      </>}
+    </div>}
+    {expired && <p className="results-count" role="status">下载链接已过期，可刷新渲染状态核对新链接。</p>}
+    {video && !download && !expired && <p className="results-count">跨域视频在新标签页打开，是否自动保存由视频服务决定。</p>}
     {phase === 'completed' && (record?.cards_urls ?? []).length > cardUrls.length &&
       <p className="results-count">部分静态图未提供可用链接。</p>}
     {cards.length > 0 && <ul className="render-cards">

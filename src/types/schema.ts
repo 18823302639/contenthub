@@ -100,6 +100,8 @@ export interface ProductionItem {
   render_status?: string
   render_job_id?: string | null
   video_url?: string
+  video_download_url?: string
+  video_download_expires_at?: string
   cards_urls?: string[]
   render_error?: string
   /** 未发布时为空字符串。 */

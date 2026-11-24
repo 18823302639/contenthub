@@ -131,3 +131,20 @@ it('WF4 读取可选任务 ID，保留空回执并解码 NocoDB 的任务字段'
     method: 'POST', body: '{"record_id":9}',
   })])
 })
+
+it('只读 NocoDB 记录可携带独立下载 URL 和期限，旧记录保留原有契约', async () => {
+  const attachment = 'https://media.example.invalid/file.mp4?download=synthetic%2Bvalue'
+  const fetcher = vi.fn<typeof fetch>()
+    .mockResolvedValueOnce(Response.json({
+      id: 9, video_url: '/preview.mp4', video_download_url: attachment,
+      video_download_expires_at: '2026-06-03T12:26:00Z',
+    }))
+    .mockResolvedValueOnce(Response.json({ id: 9, video_url: '/preview.mp4' }))
+  const api = createContentHubApi({
+    VITE_USE_MOCK: 'false', VITE_NOCODB_PRODUCTION_POOL_TABLE_ID: 'mtestproduction',
+  }, fetcher)
+  await expect(api.getProductionItem(9)).resolves.toMatchObject({
+    video_url: '/preview.mp4', video_download_url: attachment, video_download_expires_at: '2026-06-03T12:26:00Z',
+  })
+  expect(await api.getProductionItem(9)).not.toHaveProperty('video_download_url')
+})
