@@ -450,3 +450,25 @@ it.each(['手动', '自动'])('读取渲染状态超时后恢复%s刷新，迟�
     ['/api/nocodb/tables/mtestrender/records/1', 'GET'],
   ])
 })
+
+it.each(['rendering', 'failed', 'completed'])('已确认成片后，同任务的 %s 快照缺少地址时保留当前成片', async renderStatus => {
+  const completed = { ...row, render_job_id: 'job-current', render_status: 'completed', video_url: '/current.mp4' }
+  const api = fixture([completed])
+  mount(api, '/workbench?id=1')
+  const download = await screen.findByRole('link', { name: '下载视频' })
+  expect(download.getAttribute('href')).toBe('/current.mp4')
+  vi.mocked(api.getProductionItem).mockResolvedValueOnce({ ...completed, render_status: renderStatus, video_url: '' })
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: '刷新渲染状态' })))
+  expect(screen.getByText('渲染状态 · 已完成')).toBeTruthy()
+  expect(screen.getByRole('link', { name: '下载视频' }).getAttribute('href')).toBe('/current.mp4')
+})
+
+it('同一任务先完成后补齐成片地址时，仍可通过刷新获取下载链接', async () => {
+  const completed = { ...row, render_job_id: 'job-current', render_status: 'completed', video_url: '' }
+  const api = fixture([completed])
+  mount(api, '/workbench?id=1')
+  await screen.findByText('渲染已完成，暂未提供可用的视频地址。')
+  vi.mocked(api.getProductionItem).mockResolvedValueOnce({ ...completed, video_url: '/current.mp4' })
+  fireEvent.click(screen.getByRole('button', { name: '刷新渲染状态' }))
+  expect((await screen.findByRole('link', { name: '下载视频' })).getAttribute('href')).toBe('/current.mp4')
+})
