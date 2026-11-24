@@ -1,4 +1,4 @@
-import { Copy, Download, RefreshCw } from 'lucide-react'
+import { ArrowUpRight, Copy, Download, RefreshCw } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ContentHubApi } from '../../api'
 import { isDefiniteRenderRejection } from '../../app/renderSubmissionChecks'
@@ -163,6 +163,7 @@ export function RenderResults({ model }: { model: ReturnType<typeof useRenderRes
   const [copy, setCopy] = useState('')
   const { phase, record, jobId, reading, refresh, error, blocked } = model
   const video = phase === 'completed' ? mediaUrl(record?.video_url) : null
+  const sameOriginVideo = video !== null && new URL(video, window.location.href).origin === window.location.origin
   const cardUrls = (record?.cards_urls ?? []).map(mediaUrl).filter((url): url is string => url !== null)
   const cards = phase === 'completed' ? [...new Set(cardUrls)] : []
   const [copySource, setCopySource] = useState<string | null>(null)
@@ -187,8 +188,9 @@ export function RenderResults({ model }: { model: ReturnType<typeof useRenderRes
     {video && <>
       <video src={video} controls preload="none" playsInline aria-label="成片预览" />
       <div className="render-results-head">
-        <a className="button button--secondary" href={video} target="_blank" rel="noopener noreferrer" download>
-          <Download size={15} aria-hidden />下载视频
+        <a className="button button--secondary" href={video} target="_blank" rel="noopener noreferrer" download={sameOriginVideo}>
+          {sameOriginVideo ? <><Download size={15} aria-hidden />下载视频</>
+            : <><ArrowUpRight size={15} aria-hidden />打开视频</>}
         </a>
         <button type="button" className="button button--secondary" onClick={async () => {
           setCopySource(video)
@@ -201,6 +203,7 @@ export function RenderResults({ model }: { model: ReturnType<typeof useRenderRes
         }}><Copy size={15} aria-hidden />复制视频链接</button>
         {copySource === video && <span role="status">{copy}</span>}
       </div>
+      {!sameOriginVideo && <p className="results-count">跨域视频在新标签页打开，是否自动保存由视频服务决定。</p>}
     </>}
     {phase === 'completed' && (record?.cards_urls ?? []).length > cardUrls.length &&
       <p className="results-count">部分静态图未提供可用链接。</p>}
