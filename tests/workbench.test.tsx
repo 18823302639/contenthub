@@ -421,7 +421,7 @@ describe('改稿台', () => {
     expect((await editor()).value).toBe(unsaved)
   })
 
-  it('复制当前全文、保存定稿，并仅登记发布状态和时间', async () => {
+  it('复制当前全文、人工复核定稿，并仅登记发布状态和时间', async () => {
     const api = mount(3)
     const write = vi.spyOn(api, 'updateProductionItem')
     const copy = vi.fn().mockResolvedValue(undefined)
@@ -432,9 +432,11 @@ describe('改稿台', () => {
     press('复制全文')
     await screen.findByText('已复制全文。')
     expect(copy).toHaveBeenCalledWith(markdown)
-    press('保存定稿')
-    await screen.findByText('定稿已保存。')
-    expect(write.mock.calls[0]).toEqual([3, { final_md: markdown }])
+    press('人工复核通过并定稿')
+    await screen.findByText('已保存并定稿。')
+    expect(write.mock.calls[0]).toEqual([3, {
+      draft_md: markdown, final_md: markdown, final_content: markdown, workflow_status: '已定稿',
+    }])
     press('标记为已发布')
     await screen.findByText('已记录发布状态和时间。')
     expect(write.mock.calls[1]).toEqual([3, { workflow_status: '已发布', published_at: expect.any(String) }])
@@ -476,12 +478,12 @@ describe('改稿台', () => {
     const api = mount(3)
     const draft = await editor()
     fireEvent.change(draft, { target: { value: '# 保存的版本' } })
-    press('保存定稿')
+    press('人工复核通过并定稿')
     fireEvent.change(draft, { target: { value: '# 保存途中补充的版本' } })
-    await screen.findByText('定稿已保存。')
+    await screen.findByText('已保存并定稿。')
     expect((await editor()).value).toBe('# 保存途中补充的版本')
     expect((await api.getProductionItem(3)).final_md).toBe('# 保存的版本')
-    press('保存定稿')
+    press('人工复核通过并定稿')
     await waitFor(async () => expect((await api.getProductionItem(3)).final_md).toBe('# 保存途中补充的版本'))
   })
 
@@ -575,7 +577,7 @@ describe('改稿台', () => {
     expect((await editor()).value).toBe('')
     expect(screen.getByText('暂无原文素材。')).toBeTruthy()
     expect(screen.getByText('暂无稿件，可直接编辑。')).toBeTruthy()
-    expect((screen.getByRole('button', { name: '保存定稿' }) as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByRole('button', { name: '人工复核通过并定稿' }) as HTMLButtonElement).disabled).toBe(true)
   })
 
   it('读取失败可刷新重试，剪贴板拒绝时显示实际反馈', async () => {

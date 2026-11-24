@@ -39,6 +39,12 @@ export function createMockBackend() {
       await delay()
       return structuredClone(find(table, id))
     },
+    async remove(table, id) {
+      await delay()
+      const rows = data[table]
+      const item = find(table, id)
+      rows.splice(rows.indexOf(item), 1)
+    },
     async create(table, fields) {
       const input = structuredClone(fields)
       await delay()
@@ -169,8 +175,8 @@ export function createMockBackend() {
     if (['queued', 'rendering'].includes(item.render_status ?? '')) throw new Error('已有模拟渲染任务。')
     updateProduction(item, { render_status: 'rendering', render_error: '', video_url: '', cards_urls: [] })
     setTimeout(() => {
-      const latest = find('production_pool', id)
-      updateProduction(latest, { render_status: 'completed' })
+      const latest = data.production_pool.find(row => row.id === id)
+      if (latest) updateProduction(latest, { render_status: 'completed' })
     }, workflowDelayMs)
     return { accepted: true, status: 202 }
   }

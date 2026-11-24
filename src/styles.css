@@ -9,6 +9,7 @@
   --muted: #565e74;
   --accent: #5344c2;
   --accent-hover: #4434ac;
+  --workspace-bar-height: 53px;
   --sidebar-width: 224px;
   font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "PingFang SC",
     "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
@@ -98,7 +99,7 @@ body { min-width: 320px; }
 .workspace-body { margin-left: var(--sidebar-width); }
 .workspace-bar {
   display: flex;
-  min-height: 53px;
+  min-height: var(--workspace-bar-height);
   align-items: center;
   gap: 9px;
   border-bottom: 1px solid var(--line);
@@ -276,7 +277,7 @@ body { min-width: 320px; }
   :root { --sidebar-width: 0px; }
   .workspace-sidebar { display: none; }
   .workspace-bar .mobile-menu-trigger { display: inline-flex; min-width: 44px; min-height: 44px; padding: 0; }
-  .workspace-bar { position: sticky; inset-block-start: 0; z-index: 2; }
+  .workspace-bar { position: sticky; inset-block-start: 0; z-index: 3; }
   .mobile-navigation[open] {
     display: block; position: fixed; inset: 0 auto 0 0; margin: 0; max-width: none; max-height: none;
     width: min(290px, 88vw); height: 100dvh; border: 0; background: var(--surface); color: var(--ink);
@@ -308,3 +309,5 @@ body { min-width: 320px; }
 
 .production-track-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
 .production-track-tabs [aria-pressed='true'] { background: #efedfc; border-color: #d8d0f4; color: var(--accent); }
+
+.topic-delete:not(:disabled):hover { color: #9d2634; background: #fff1f2; }

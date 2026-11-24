@@ -1,4 +1,4 @@
-import { ArrowUpRight, LoaderCircle, Star } from 'lucide-react'
+import { ArrowUpRight, LoaderCircle, Star, Trash2 } from 'lucide-react'
 import { useId } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { aiProcessingLabel } from '../../api/workflowPolling'
@@ -36,7 +36,7 @@ export function TopicFeedback({ activity, hidden = false }: { activity: TopicAct
   )
 }
 
-export function TopicCard({ item, activity, writeBusy, onConfirm, onGenerate, onAbandon, onOpen }: {
+export function TopicCard({ item, activity, writeBusy, onConfirm, onGenerate, onAbandon, onOpen, onDelete }: {
   item: ProductionItem
   activity?: TopicActivity
   writeBusy: boolean
@@ -44,6 +44,7 @@ export function TopicCard({ item, activity, writeBusy, onConfirm, onGenerate, on
   onGenerate: (item: ProductionItem) => Promise<void>
   onOpen: (id: number, opener: HTMLButtonElement) => void
   onAbandon: (item: ProductionItem) => Promise<void>
+  onDelete: (item: ProductionItem) => Promise<void>
 }) {
   const headingId = useId()
   const { search } = useLocation()
@@ -55,6 +56,7 @@ export function TopicCard({ item, activity, writeBusy, onConfirm, onGenerate, on
   const wf2 = wf2Tracks.some(track => track === item.track_tag)
   const generating = isGeneratingDraft(activity) || item.workflow_status === '生成中'
   const draftExists = hasDraft(item)
+  const title = item.zh_title.trim() || item.raw_title.trim() || '未命名选题'
 
   return (
     <article className="topic-card" aria-labelledby={headingId}>
@@ -63,7 +65,7 @@ export function TopicCard({ item, activity, writeBusy, onConfirm, onGenerate, on
           : <span className="pill pill--neutral">{item.track_tag || '未标注赛道'}</span>}
         <span className={'pill pill--' + statusTone}>{item.workflow_status || '未标注状态'}</span>
       </div>
-      <h2 id={headingId}>{item.zh_title.trim() || item.raw_title.trim() || '未命名选题'}</h2>
+      <h2 id={headingId}>{title}</h2>
       <p className="topic-source">{item.source_name}</p>
       <div className="topic-meta">
         <span className={'pill pill--' + (item.score === null ? 'neutral' : 'score')} title="选题评分">
@@ -104,6 +106,10 @@ export function TopicCard({ item, activity, writeBusy, onConfirm, onGenerate, on
         {canAbandon(item) && (
           <button className="button button--quiet" disabled={blocked} onClick={() => void onAbandon(item)}>放弃</button>
         )}
+        <button type="button" className="button button--quiet topic-delete" disabled={blocked || generating || activity?.kind === 'waiting'}
+          onClick={() => {
+            if (window.confirm(`确定删除「${title}」吗？删除后无法撤销。`)) void onDelete(item)
+          }}><Trash2 size={14} aria-hidden />删除</button>
       </div>
     </article>
   )

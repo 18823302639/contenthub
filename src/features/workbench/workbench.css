@@ -180,6 +180,7 @@
 .wb-remotion { display: grid; gap: 10px; margin-top: 10px; }
 .wb-content-tabs { min-width: 0; padding: 0 8px; margin-bottom: 10px; }
 .wb-content-panel { min-width: 0; }
+.wb-content-panel[hidden] { display: none; }
 .wb-extra-editor { display: grid; gap: 8px; padding: 12px 14px; }
 .wb-extra-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; }
 .wb-extra-editor label { font-size: 13px; font-weight: 650; }
@@ -204,6 +205,8 @@
   .wb-footer-actions .button { flex: 1 1 auto; white-space: normal; }
   .wb-footer-actions label { min-height: 36px; }
   .wb-tabs { flex-wrap: nowrap; overflow-x: auto; }
+  .wb-content-tabs { position: sticky; top: var(--workspace-bar-height); z-index: 2; background: var(--surface); }
+  .wb-content-tabs button { min-height: 44px; }
   .wb-tabs button { flex-shrink: 0; white-space: nowrap; }
 }
 

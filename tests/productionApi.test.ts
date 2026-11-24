@@ -71,6 +71,8 @@ describe('Remotion 兼容性', () => {
     const { parseRemotion } = await import('../src/features/productionDesk/remotion')
     expect(parseRemotion('')).toMatchObject({ value: null, error: null, missingSources: [] })
     expect(parseRemotion('{"scenes":')).toMatchObject({ value: null, error: expect.any(String) })
+    expect(parseRemotion('false')).toMatchObject({ value: false, error: null })
+    expect(parseRemotion('[]')).toMatchObject({ value: [], error: null })
     expect(parseRemotion('{"scenes":[{"source":" "}],"cards":[null,{"source":"原始数据"}]}'))
       .toMatchObject({ error: null, missingSources: ['scenes[0].source', 'cards[0].source'] })
     expect(parseRemotion('{"scenes":[{"source":"原始数据"}],"cards":[]}'))

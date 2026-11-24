@@ -1,11 +1,16 @@
-import type { JsonObject, JsonValue } from '../../types/schema'
+import type { JsonValue } from '../../types/schema'
 
-export function remotionText(value: JsonObject | string | null | undefined) {
-  return typeof value === 'string' ? value : value ? JSON.stringify(value, null, 2) : ''
+export function remotionText(value: JsonValue | undefined) {
+  return value == null ? '' : typeof value === 'string' ? value : JSON.stringify(value, null, 2)
+}
+
+export function remotionWriteValue(value: JsonValue) {
+  // String values returned by NocoDB are read as editor JSON text.
+  return typeof value === 'string' ? JSON.stringify(value) : value
 }
 
 export function parseRemotion(input: string): {
-  value: JsonObject | null
+  value: JsonValue
   error: string | null
   missingSources: string[]
   missingYears: string[]
@@ -24,10 +29,7 @@ export function parseRemotion(input: string): {
     const position = lines ? `第 ${lines.length} 行第 ${lines.at(-1)!.length + 1} 列 · ` : ''
     return { ...empty, error: 'JSON 语法错误 · ' + position + detail }
   }
-  if (value === null) return empty
-  if (typeof value !== 'object' || Array.isArray(value)) {
-    return { ...empty, error: 'Remotion JSON 顶层应为对象。' }
-  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return { ...empty, value }
 
   const missingSources: string[] = []
   const missingYears: string[] = []

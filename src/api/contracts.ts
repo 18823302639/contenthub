@@ -1,4 +1,4 @@
-import type { AccountMetric, JsonObject, Platform, PoolType, PostMetric, ProductionItem, RadarItem, RssSource, RssSyncInterval, RssSyncSettings, WorkflowStatus } from '../types/schema'
+import type { AccountMetric, JsonValue, Platform, PoolType, PostMetric, ProductionItem, RadarItem, RssSource, RssSyncInterval, RssSyncSettings, WorkflowStatus } from '../types/schema'
 
 export interface ProductionFilters {
   trackTag?: string
@@ -19,7 +19,7 @@ export type NewAccountMetric = {
 export type ProductionUpdate = Partial<Pick<ProductionItem,
   'zh_title' | 'raw_content' | 'fact_check' | 'draft_md' | 'final_md' | 'final_content' | 'video_script' |
   'revision_note' | 'published_at' | 'is_benchmark' | 'compliance_risk'
-> & { workflow_status: WorkflowStatus; remotion_data: JsonObject | null }>
+> & { workflow_status: WorkflowStatus; remotion_data: JsonValue }>
 
 export type VideoFormat = '16x9' | '9x16'
 export type VideoVoice =
@@ -53,6 +53,7 @@ export interface ContentHubApi {
   readonly mode: 'mock' | 'real'
   listProductionItems(filters?: ProductionFilters, onTotalRows?: (total: number) => void): Promise<ProductionItem[]>
   getProductionItem(id: number): Promise<ProductionItem>
+  deleteProductionItem(id: number): Promise<void>
   updateProductionItem(id: number, changes: ProductionUpdate): Promise<ProductionItem>
   listRssSources(poolType?: PoolType): Promise<RssSource[]>
   getRssSyncSettings(): Promise<RssSyncSettings>
@@ -85,6 +86,7 @@ export type TableName = keyof Tables
 export interface RecordStore {
   list<T extends TableName>(table: T, onTotalRows?: (total: number) => void): Promise<Tables[T][]>
   get<T extends TableName>(table: T, id: number): Promise<Tables[T]>
+  remove(table: 'production_pool', id: number): Promise<void>
   create<T extends keyof NewRecords>(table: T, fields: NewRecords[T]): Promise<Tables[T]>
   update<T extends TableName>(table: T, id: number, changes: Partial<Omit<Tables[T], 'id'>>): Promise<Tables[T]>
 }

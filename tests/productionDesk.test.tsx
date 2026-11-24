@@ -273,7 +273,7 @@ it('旧赛道的四个标签均可切换，口播和 JSON 可保存且信源面�
   })
 })
 
-it('空白 Remotion 数据填好后解除缺失提示，保存回读后可提交渲染', async () => {
+it('抽屉内空白 Remotion 可直接提交，手动填写时仅拦截语法错误', async () => {
   const eligible: ProductionItem = { ...main, compliance_risk: '低风险', remotion_data: null }
   const api = mount(createContentHubApi({}), [eligible])
   vi.spyOn(api, 'getProductionItem').mockResolvedValue(eligible)
@@ -284,11 +284,18 @@ it('空白 Remotion 数据填好后解除缺失提示，保存回读后可提交
   fireEvent.click(await modal.findByRole('tab', { name: 'Remotion 渲染数据' }))
   const panel = within(modal.getByRole('tabpanel', { name: 'Remotion 渲染数据' }))
   const renderButton = modal.getByRole<HTMLButtonElement>('button', { name: '提交 Remotion 渲染' })
-  expect(panel.getByText('请先填写 Remotion JSON。')).toBeTruthy()
-  expect(renderButton.disabled).toBe(true)
+  const finalize = modal.getByRole<HTMLButtonElement>('button', { name: '人工复核通过并定稿' })
+  expect(panel.getByText('留空时由 WF4 自动生成分镜。')).toBeTruthy()
+  expect(renderButton.disabled).toBe(false)
+  expect(finalize.disabled).toBe(false)
   const json = panel.getByRole<HTMLTextAreaElement>('textbox', { name: 'Remotion JSON' })
-  fireEvent.change(json, { target: { value: '{"cards":[{"source":"原始数据（2024）"}]}' } })
-  expect(modal.queryByText('请先填写 Remotion JSON。')).toBeNull()
+  fireEvent.change(json, { target: { value: '{"cards":[' } })
+  expect(panel.getByRole('alert').textContent).toContain('JSON 语法错误')
+  expect(finalize.disabled).toBe(true)
+  expect(renderButton.disabled).toBe(true)
+  fireEvent.change(json, { target: { value: '{"cards":[{}]}' } })
+  expect(panel.getByRole('alert').textContent).toContain('cards[0].source')
+  expect(finalize.disabled).toBe(false)
   expect(json.getAttribute('aria-invalid')).toBe('false')
   fireEvent.click(panel.getByRole('button', { name: '格式化 JSON' }))
   expect(json.value).toContain('\n  "cards": [')
@@ -296,4 +303,6 @@ it('空白 Remotion 数据填好后解除缺失提示，保存回读后可提交
   fireEvent.click(modal.getByRole('button', { name: '保存草稿' }))
   await modal.findByText('草稿已保存')
   expect(renderButton.disabled).toBe(false)
+  const remotionTab = modal.getByRole('tab', { name: 'Remotion 渲染数据' })
+  expect(remotionTab.getAttribute('aria-controls')).toBe(panel.getByRole('textbox').closest('[role="tabpanel"]')?.id)
 })

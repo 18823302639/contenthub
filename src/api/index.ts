@@ -37,6 +37,10 @@ export function createContentHubApi(env: ContentHubEnv, fetcher: typeof fetch = 
       return rows.filter(row => matchesProductionFilters(row, filters))
     },
     getProductionItem: id => store.get('production_pool', id),
+    async deleteProductionItem(id) {
+      requireRecordId(id)
+      await store.remove('production_pool', id)
+    },
     updateProductionItem(id, changes) {
       const patch = Object.fromEntries(Object.entries(changes).filter(([, value]) => value !== undefined))
       return store.update('production_pool', id, patch)

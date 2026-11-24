@@ -189,7 +189,7 @@ it('长改稿队列内可按标题搜索，过滤不会改变当前稿件', asyn
   expect(screen.getByText(/选题记录 #1/)).toBeTruthy()
 })
 
-it('高危词和来源年份阻止定稿，修改已经核对的内容会重置确认', async () => {
+it('高危词与 JSON 语法错误阻止定稿，来源年份缺失只提示', async () => {
   const warned = { ...row, zh_title: '投资预测', remotion_data: { scenes: [{ source: '样本' }] } }
   mount(fixture([warned]), '/workbench?id=1')
   await editor()
@@ -198,8 +198,9 @@ it('高危词和来源年份阻止定稿，修改已经核对的内容会重置�
   expect(screen.getByText(/标题 · 投资、预测/)).toBeTruthy()
   const acknowledgement = screen.getByRole<HTMLInputElement>('checkbox', { name: '人工复核后将风险改为低风险' })
   fireEvent.click(acknowledgement)
-  expect(finalize.disabled).toBe(true)
+  expect(finalize.disabled).toBe(false)
   fireEvent.click(screen.getByRole('tab', { name: 'Remotion 渲染数据' }))
+  expect(screen.getByText(/请补齐来源年份/)).toBeTruthy()
   const json = screen.getByRole('textbox', { name: 'Remotion JSON' })
   fireEvent.change(json, { target: { value: '{"scenes":[' } })
   expect(screen.getAllByText(/JSON 语法错误/).length).toBeGreaterThan(0)
@@ -240,4 +241,32 @@ it('独立改稿台可以切换四个面板，业务禁渲染时仍能修改并�
   fireEvent.click(screen.getByRole('button', { name: '保存草稿' }))
   await screen.findByText('草稿已保存。')
   expect(write).toHaveBeenCalledExactlyOnceWith(1, { draft_md: item.draft_md, video_script: '改稿台里的口播' })
+})
+
+it('精修 Tab 有独立面板且空白 Remotion 不禁用原有定稿和渲染操作', async () => {
+  const item = { ...row, remotion_data: null }
+  const api = fixture([item])
+  const trigger = vi.spyOn(api, 'triggerRender').mockResolvedValue({ accepted: true, status: 202 })
+  mount(api, '/workbench?id=1')
+  await editor()
+  const tabs = within(screen.getByRole('tablist', { name: '精修内容' }))
+  const buttons = tabs.getAllByRole('tab')
+  expect(new Set(buttons.map(button => button.getAttribute('aria-controls'))).size).toBe(4)
+  for (const button of buttons) {
+    fireEvent.click(button)
+    expect(button.getAttribute('aria-selected')).toBe('true')
+    expect(document.getElementById(button.getAttribute('aria-controls')!)?.hidden).toBe(false)
+    for (const inactive of buttons.filter(tab => tab !== button)) {
+      expect(inactive.getAttribute('aria-selected')).toBe('false')
+      expect(document.getElementById(inactive.getAttribute('aria-controls')!)?.hidden).toBe(true)
+    }
+  }
+  const finalize = screen.getByRole<HTMLButtonElement>('button', { name: '人工复核通过并定稿' })
+  expect(finalize.disabled).toBe(false)
+  expect(screen.queryByRole('button', { name: '保存定稿' })).toBeNull()
+  const render = screen.getByRole<HTMLButtonElement>('button', { name: '提交 Remotion 渲染' })
+  expect(render.disabled).toBe(false)
+  fireEvent.click(render)
+  await screen.findByText('Remotion 渲染请求已受理')
+  expect(trigger).toHaveBeenCalledExactlyOnceWith(1)
 })

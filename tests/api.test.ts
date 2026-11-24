@@ -596,3 +596,17 @@ describe('n8n Webhook', () => {
     expect(fetcher).toHaveBeenCalledTimes(1)
   })
 })
+
+it('删除选题经同源 NocoDB 记录集合发送配置的主键，确认回执', async () => {
+  const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(Response.json([{ Id: 7 }]))
+  const api = createContentHubApi(env, fetcher)
+  await api.deleteProductionItem(7)
+  expect(fetcher).toHaveBeenCalledExactlyOnceWith('/backend/nocodb/tables/mtestproduct1234/records', expect.objectContaining({
+    method: 'DELETE', body: '[{"Id":7}]', redirect: 'error',
+  }))
+  const headers = new Headers(fetcher.mock.calls[0][1]?.headers)
+  expect(headers.get('Content-Type')).toBe('application/json')
+  expect(headers.has('xc-token')).toBe(false)
+  await expect(api.deleteProductionItem(0)).rejects.toThrow(/记录 ID/)
+  expect(fetcher).toHaveBeenCalledOnce()
+})

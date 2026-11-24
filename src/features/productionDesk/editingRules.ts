@@ -23,13 +23,14 @@ export function needsRemotion(record: ProductionItem) {
     (record.track_tag === 'main_overseas' || record.need_remotion === true)
 }
 
-export function renderDataIssue(parsed: ReturnType<typeof parseRemotion>) {
-  if (parsed.error) return parsed.error
-  if (!parsed.value) return '请先填写 Remotion JSON。'
+export function renderDataWarning(parsed: ReturnType<typeof parseRemotion>) {
+  const { value } = parsed
+  if (parsed.error || value === null) return null
+  if (typeof value !== 'object' || Array.isArray(value)) return '建议将 Remotion 数据组织为包含 scenes 或 cards 的对象。'
   if (parsed.missingSources.length) return '请补齐一手数据来源 · ' + parsed.missingSources.join('、')
   if (parsed.missingYears.length) return '请补齐来源年份 · ' + parsed.missingYears.join('、')
-  if (![parsed.value.scenes, parsed.value.cards].some(rows => Array.isArray(rows) && rows.length > 0)) {
-    return '请至少填写一项 scenes 或 cards，并注明一手数据来源和年份。'
+  if (![value.scenes, value.cards].some(rows => Array.isArray(rows) && rows.length > 0)) {
+    return '建议为 scenes 或 cards 标注一手数据来源和年份。'
   }
   return null
 }
@@ -39,6 +40,6 @@ export function renderRecordIsCurrent(current: ProductionItem, latest: Productio
   const fields = ['zh_title', 'draft_md', 'final_md', 'final_content', 'video_script'] as const
   const active = ['queued', 'rendering', '排队中', '渲染中'].includes(latest.render_status?.trim().toLowerCase() ?? '')
   return latest.id === current.id && needsRemotion(latest) && !active &&
-    productionRiskLabel(latest.compliance_risk) !== '高风险' && !renderDataIssue(data) &&
+    productionRiskLabel(latest.compliance_risk) !== '高风险' && !data.error &&
     sameRemotion(data.value, parsed.value) && fields.every(field => latest[field] === current[field])
 }

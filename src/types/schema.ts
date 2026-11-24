@@ -91,7 +91,7 @@ export interface ProductionItem {
   final_md?: string
   final_content?: string
   video_script?: string
-  remotion_data?: JsonObject | string | null
+  remotion_data?: JsonValue
   compliance_report?: ComplianceReport | null
   fact_check_notes?: string
   revision_note?: string

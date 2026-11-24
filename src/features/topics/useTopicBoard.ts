@@ -21,6 +21,9 @@ const messages = {
   readbackFailed: '保存请求成功，但回读失败。请刷新列表核对，本次未触发 Webhook。',
   checked: '已读取最新状态。',
   abandoning: '正在保存放弃状态…',
+  deleting: '正在删除选题…',
+  deleted: '选题已删除。',
+  deleteUnverified: '删除未能确认，请刷新列表核对。',
   abandoned: '已放弃该选题。',
   abandonUnverified: '未能确认放弃状态。请刷新列表核对。',
   stateChanged: '回读显示其他流程状态，请核对最新记录。本次未触发 Webhook。',
@@ -57,12 +60,12 @@ export function isActivityError(activity: TopicActivity) {
   return activity.kind === 'webhookUnverified' || activity.kind === 'watchPaused' ||
     activity.kind === 'watchFailed' || activity.kind === 'watchChanged' ||
     activity.kind === 'saveUnverified' || activity.kind === 'readbackFailed' ||
-    activity.kind === 'abandonUnverified' || activity.kind === 'stateChanged' ||
+    activity.kind === 'abandonUnverified' || activity.kind === 'deleteUnverified' || activity.kind === 'stateChanged' ||
     activity.kind === 'wf2Failed' || activity.kind === 'wf2Timeout'
 }
 
 export function isMutationBlocked(activity?: TopicActivity) {
-  return activity?.kind === 'saving' || activity?.kind === 'submitting' || activity?.kind === 'abandoning' ||
+  return activity?.kind === 'saving' || activity?.kind === 'submitting' || activity?.kind === 'abandoning' || activity?.kind === 'deleting' ||
     activity?.kind === 'saveUnverified' || activity?.kind === 'readbackFailed' || activity?.kind === 'abandonUnverified' ||
     isGeneratingDraft(activity)
 }
@@ -332,6 +335,34 @@ export function useTopicBoard(api: ContentHubApi, writes: RecordWrites) {
     }
   }
 
+  async function remove(item: ProductionItem) {
+    const activity = state.activities[item.id]
+    if (busy.current.has(item.id) || isMutationBlocked(activity) || activity?.kind === 'waiting' ||
+        item.workflow_status === '生成中') return
+    const release = writes.acquire(item.id)
+    if (!release) return
+    busy.current.add(item.id)
+    publish(item, 'deleting')
+    try {
+      await api.deleteProductionItem(item.id)
+    } catch (error) {
+      publish(item, 'deleteUnverified', { detail: message(error) })
+      return
+    } finally {
+      busy.current.delete(item.id)
+      release()
+    }
+    watchers.current.delete(item.id)
+    if (!mounted.current) return
+    setState(current => ({
+      ...current,
+      items: current.items?.filter(row => row.id !== item.id) ?? null,
+      totalRows: current.totalRows === null ? null : Math.max(0, current.totalRows - 1),
+    }))
+    publish(item, 'deleted')
+    await refresh()
+  }
+
   const refreshIfLoaded = useCallback(() => {
     if (mounted.current && loadedOnce.current) void refresh()
   }, [refresh])
@@ -350,7 +381,7 @@ export function useTopicBoard(api: ContentHubApi, writes: RecordWrites) {
   }, [])
 
   return {
-    ...state, refresh, refreshIfLoaded, ensureLoaded, confirm, generateDraft, abandon,
+    ...state, refresh, refreshIfLoaded, ensureLoaded, confirm, generateDraft, abandon, remove,
     observeWorkbenchWrite, lockedIds: writes.lockedIds,
   }
 }

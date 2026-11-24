@@ -23,7 +23,7 @@ export function createNocodbClient(env: ContentHubEnv, fetcher: typeof fetch): R
     return `${base}/tables/${encodeURIComponent(id)}/records`
   }
 
-  async function send(url: string, method: 'GET' | 'POST' | 'PATCH', fields?: object) {
+  async function send(url: string, method: 'GET' | 'POST' | 'PATCH' | 'DELETE', fields?: object) {
     const headers = new Headers({ Accept: 'application/json' })
     if (fields) headers.set('Content-Type', 'application/json')
 
@@ -127,6 +127,18 @@ export function createNocodbClient(env: ContentHubEnv, fetcher: typeof fetch): R
       }
     },
     get,
+    async remove(table, id) {
+      const response = await send(recordsUrl(table), 'DELETE', { [idField]: id })
+      if (response.status === 204) return
+      try {
+        const receipt: unknown = await response.json()
+        if (Array.isArray(receipt) && receipt.length === 1 &&
+            readRecordId(asObject(receipt[0]), idField) === id) return
+      } catch {
+        // 响应可能来自代理或缺少有效记录 ID，交给列表核对。
+      }
+      throw new Error('NocoDB 删除回执未能确认，请刷新列表核对记录。')
+    },
     create: (table, fields) => write(table, 'POST', fields, null),
     async update(table, id, changes) {
       requireRecordId(id)

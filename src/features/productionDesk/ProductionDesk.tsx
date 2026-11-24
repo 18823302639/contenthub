@@ -7,13 +7,13 @@ import type { ProductionItem } from '../../types/schema'
 import { renderMarkdownHtml } from '../workbench/MarkdownPreview'
 import { useUnsavedChanges } from '../../app/UnsavedChanges'
 import { requestAiDraft } from '../workbench/requestAiDraft'
-import { editorialWarnings, needsRemotion, renderDataIssue, renderRecordIsCurrent, reviewIssue } from './editingRules'
+import { editorialWarnings, needsRemotion, renderDataWarning, renderRecordIsCurrent, reviewIssue } from './editingRules'
 import { RenderResults, useRenderResults } from './RenderResults'
-import { editorialTabs, Tabs } from '../workbench/EditorTabs'
+import { EditorialPanels } from '../workbench/EditorTabs'
 import type { EditorialTab } from '../workbench/EditorTabs'
 import { ComplianceBanner } from './ComplianceBanner'
 import { SourceReference } from './SourceReference'
-import { parseRemotion, remotionText, sameRemotion } from './remotion'
+import { parseRemotion, remotionText, remotionWriteValue, sameRemotion } from './remotion'
 import './productionDesk.css'
 
 type Operation = 'save' | 'finalize' | 'render' | 'rewrite'
@@ -49,7 +49,7 @@ function matchesWrite(record: ProductionItem, patch: ProductionUpdate) {
   return (Object.keys(patch) as (keyof ProductionUpdate)[]).every(key => {
     if (key === 'remotion_data') {
       const parsed = parseRemotion(remotionText(record.remotion_data))
-      return !parsed.error && sameRemotion(parsed.value, patch.remotion_data)
+      return !parsed.error && sameRemotion(parsed.value, parseRemotion(remotionText(patch.remotion_data)).value)
     }
     return (record[key] ?? '') === patch[key]
   })
@@ -75,7 +75,7 @@ function DeskEditor({ api, record: initial, writes, onSaved, requestClose, regis
   const main = needsRemotion(record)
   const render = useRenderResults(api, record, main)
   const parsed = parseRemotion(values.remotion)
-  const jsonIssue = renderDataIssue(parsed)
+  const jsonIssue = parsed.error ?? renderDataWarning(parsed)
   const warnings = editorialWarnings(values)
   const fieldsKey = JSON.stringify(values)
   const markLow = fieldsKey === reviewTicket
@@ -90,9 +90,9 @@ function DeskEditor({ api, record: initial, writes, onSaved, requestClose, regis
     values.script !== original.script || remotionChanged
   const dirty = markLow || changed
   useUnsavedChanges(dirty)
-  const finalizeReason = approvalIssue || (main ? jsonIssue : null) ||
+  const finalizeReason = approvalIssue || parsed.error ||
     (!values.title.trim() || !values.article.trim() ? '定稿需要中文标题和图文正文。' : null)
-  const renderReason = approvalIssue || jsonIssue ||
+  const renderReason = approvalIssue || parsed.error ||
     (productionRiskLabel(record.compliance_risk) === '高风险' ? '请先用人工复核操作保存低风险等级。' : null) ||
     (changed ? '请先保存当前草稿和渲染数据。' : null) ||
     (render.phase === 'rendering' ? '已在渲染，请等待本次结果。' : null)
@@ -128,7 +128,7 @@ function DeskEditor({ api, record: initial, writes, onSaved, requestClose, regis
     if (!release) return
     const patch: ProductionUpdate = { zh_title: values.title.trim(), draft_md: values.article }
     if (main || values.script !== original.script) patch.video_script = values.script
-    if (writeRemotion) patch.remotion_data = parsed.value
+    if (writeRemotion) patch.remotion_data = remotionWriteValue(parsed.value)
     if (finalize) Object.assign(patch, {
       final_md: values.article, final_content: values.article, workflow_status: '已定稿',
       ...(markLow ? { compliance_risk: '低风险' } : {}),
@@ -228,8 +228,7 @@ function DeskEditor({ api, record: initial, writes, onSaved, requestClose, regis
           )}
         </div>
 
-        <Tabs group={group} label="精修内容" className="desk-tabs" options={editorialTabs} value={tab} select={selectTab} />
-        <div className="desk-panel" role="tabpanel" id={group + '-panel'} aria-labelledby={group + '-' + tab}>
+        <EditorialPanels group={group} value={tab} select={selectTab} tabsClassName="desk-tabs" panelClassName="desk-panel">
           {tab === 'article' && (
             <>
               <div className="desk-editor-toolbar">
@@ -259,21 +258,22 @@ function DeskEditor({ api, record: initial, writes, onSaved, requestClose, regis
             <>
               <div className="desk-editor-toolbar">
                 <label htmlFor={group + '-json-editor'}>Remotion JSON</label>
-                <button className="button button--secondary" type="button" disabled={busy || !parsed.value}
+                <button className="button button--secondary" type="button" disabled={busy || !values.remotion.trim() || Boolean(parsed.error)}
                   onClick={() => change('remotion', JSON.stringify(parsed.value, null, 2))}>格式化 JSON</button>
               </div>
               {!main && <p className="desk-muted">当前选题未启用渲染，仍可编辑并保存数据。</p>}
+              {main && !values.remotion.trim() && <p className="desk-muted">留空时由 WF4 自动生成分镜。</p>}
               {jsonIssue && <p id={group + '-json-issues'} className="topic-feedback topic-feedback--warning" role="alert">
                 {jsonIssue}
               </p>}
               <textarea className="desk-json" spellCheck={false} id={group + '-json-editor'} value={values.remotion} disabled={busy}
-                aria-invalid={Boolean(jsonIssue)}
+                aria-invalid={Boolean(parsed.error)}
                 aria-describedby={jsonIssue ? group + '-json-issues' : undefined}
                 onChange={event => change('remotion', event.target.value)} />
             </>
           )}
           {tab === 'sources' && <SourceReference record={record} />}
-        </div>
+        </EditorialPanels>
         {main && <RenderResults model={render} />}
       </div>
 

@@ -10,12 +10,12 @@ import { isWorkflowStatus, productionRiskLabel } from '../../types/schema'
 import type { ProductionItem } from '../../types/schema'
 import { externalUrl } from '../../utils/externalUrl'
 import { MarkdownPreview } from './MarkdownPreview'
-import { editorialTabs, Tabs } from './EditorTabs'
+import { EditorialPanels, Tabs } from './EditorTabs'
 import type { EditorialTab } from './EditorTabs'
 import { SourceReference } from '../productionDesk/SourceReference'
 import { useUnsavedChanges } from '../../app/UnsavedChanges'
 import { lastWorkbenchId, rememberWorkbench, WorkbenchQueue, workbenchQueue } from './WorkbenchQueue'
-import { needsRemotion, editorialWarnings, renderDataIssue, renderRecordIsCurrent, reviewIssue } from '../productionDesk/editingRules'
+import { needsRemotion, editorialWarnings, renderDataWarning, renderRecordIsCurrent, reviewIssue } from '../productionDesk/editingRules'
 import { remotionText } from '../productionDesk/remotion'
 import { RenderResults, useRenderResults } from '../productionDesk/RenderResults'
 import { VideoControls } from './VideoControls'
@@ -154,11 +154,10 @@ function Workbench({ api, id, writes, sessions, onWrite, refreshBoard, topicsPat
   const reviewKey = JSON.stringify([record?.zh_title, doc?.markdown, workbench.script, workbench.remotion])
   const markLow = reviewTicket === reviewKey
   const reviewReason = record ? reviewIssue(record, warnings, markLow || reviewedFields === reviewKey) : null
-  const jsonIssue = renderDataIssue(parsed)
-  const dataReason = video ? jsonIssue : null
-  const finalizeReason = reviewReason || dataReason ||
+  const jsonIssue = parsed.error ?? renderDataWarning(parsed)
+  const finalizeReason = reviewReason || parsed.error ||
     (!record?.zh_title.trim() || !doc?.markdown.trim() ? '定稿需要中文标题和图文正文。' : null)
-  const renderReason = reviewReason || dataReason ||
+  const renderReason = reviewReason || parsed.error ||
     (productionRiskLabel(record?.compliance_risk ?? '') === '高风险' ? '请先用人工复核操作保存低风险等级。' : null) ||
     (workbench.dirty ? '请先保存草稿和渲染数据。' : null) ||
     (render.phase === 'rendering' ? '已在渲染，请等待本次结果。' : null)
@@ -271,10 +270,8 @@ function Workbench({ api, id, writes, sessions, onWrite, refreshBoard, topicsPat
             </div>
             {record.need_remotion !== false && record.track_tag !== 'sub_toutiao' && <VideoControls api={api} productionId={id} />}
           </div>
-          <Tabs group={contentId} label="精修内容" className="wb-tabs wb-content-tabs"
-            options={editorialTabs} value={contentTab} select={setContentTab} />
-          <div id={contentId + '-panel'} role="tabpanel" aria-labelledby={contentId + '-' + contentTab}
-            tabIndex={contentTab === 'sources' ? 0 : undefined} className="wb-content-panel">
+          <EditorialPanels group={contentId} value={contentTab} select={setContentTab}
+            tabsClassName="wb-tabs wb-content-tabs" panelClassName="wb-content-panel">
             {contentTab === 'article' && <div className="wb-grid">
               <Sources record={record} />
               <EditorPanel workbench={workbench} panel={draftPanel} />
@@ -287,17 +284,18 @@ function Workbench({ api, id, writes, sessions, onWrite, refreshBoard, topicsPat
             {contentTab === 'remotion' && <div className="wb-panel wb-extra-editor">
               <div className="wb-extra-toolbar">
                 <label htmlFor={jsonId}>Remotion JSON</label>
-                <button type="button" className="button button--secondary" disabled={!parsed.value}
+                <button type="button" className="button button--secondary" disabled={!workbench.remotion.trim() || Boolean(parsed.error)}
                   onClick={() => workbench.editRemotion(JSON.stringify(parsed.value, null, 2))}>格式化 JSON</button>
               </div>
               {!video && <p className="wb-muted">当前选题未启用渲染，仍可编辑并保存数据。</p>}
+              {video && !workbench.remotion.trim() && <p className="wb-muted">留空时由 WF4 自动生成分镜。</p>}
               <textarea className="desk-json" spellCheck={false} id={jsonId} value={workbench.remotion}
-                aria-invalid={Boolean(jsonIssue)} aria-describedby={jsonIssue ? jsonId + '-error' : undefined}
+                aria-invalid={Boolean(parsed.error)} aria-describedby={jsonIssue ? jsonId + '-error' : undefined}
                 onChange={event => workbench.editRemotion(event.target.value)} />
-              {jsonIssue && <p id={jsonId + '-error'} className="topic-feedback topic-feedback--warning">{jsonIssue}</p>}
+              {jsonIssue && <p role={parsed.error ? 'alert' : undefined} id={jsonId + '-error'} className="topic-feedback topic-feedback--warning">{jsonIssue}</p>}
             </div>}
             {contentTab === 'sources' && <div className="wb-panel wb-extra-editor"><SourceReference record={record} /></div>}
-          </div>
+          </EditorialPanels>
           {warnings.length > 0 && <p className="topic-feedback topic-feedback--warning" role="status">
             高危词待核对 · {warnings.join('；')}
           </p>}
@@ -329,8 +327,6 @@ function Workbench({ api, id, writes, sessions, onWrite, refreshBoard, topicsPat
               {video && <button type="button" className="button button--secondary" disabled={Boolean(renderReason) || renderingRequest || operation !== null || writes.lockedIds.has(id)}
                 aria-describedby={renderReason ? (renderReason === finalizeReason ? finalizeReasonId : renderReasonId) : undefined}
                 onClick={() => void submitRender()}>{renderingRequest ? '正在提交…' : '提交 Remotion 渲染'}</button>}
-              <button type="button" className="button button--quiet" disabled={!workbench.canSave || Boolean(finalizeReason) || markLow}
-                onClick={() => void workbench.save()}>保存定稿</button>
             </div>
           </footer>
         </>

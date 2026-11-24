@@ -5,8 +5,8 @@ import { WriteReadbackError } from '../../api'
 import type { ContentHubApi } from '../../api'
 import { pollWorkflow } from '../../api/workflowPolling'
 import type { ProductionItem } from '../../types/schema'
-import { needsRemotion, renderDataIssue } from '../productionDesk/editingRules'
-import { parseRemotion, remotionText, sameRemotion } from '../productionDesk/remotion'
+import { needsRemotion } from '../productionDesk/editingRules'
+import { parseRemotion, remotionText, remotionWriteValue, sameRemotion } from '../productionDesk/remotion'
 import { requestAiDraft } from './requestAiDraft'
 import { renderMarkdownHtml } from './MarkdownPreview'
 
@@ -199,7 +199,6 @@ export function useWorkbench(
   const canChangeStatus = record !== undefined && isWorkflowStatus(record.workflow_status) && !terminal
   const blocked = operation !== null || needsRead || pending || watching ||
     record?.workflow_status === '生成中' || writes.lockedIds.has(id)
-  const canSave = Boolean(doc?.markdown.trim()) && !blocked && (dirty || !record?.final_md?.trim())
   const canPublish = Boolean(record?.final_md?.trim()) && !dirty && !blocked && canChangeStatus
   const canRewrite = Boolean(doc?.markdown.trim()) && !dirty && !blocked && canChangeStatus
   const canToggleBenchmark = Boolean(record) && !blocked
@@ -333,33 +332,17 @@ export function useWorkbench(
     })
   }
 
-  async function save() {
-    if (!doc || !canSave) return
-    const markdown = doc.markdown
-    await run('saving', async () => {
-      display('正在保存定稿…')
-      try {
-        const saved = await api.updateProductionItem(id, { final_md: markdown })
-        acceptWrite(saved, markdown)
-        if (saved.final_md === markdown) display('定稿已保存。')
-        else display('回读稿件与本次保存内容不同。请核对当前记录。', true)
-      } catch (error) {
-        writeUnverified(error)
-      }
-    })
-  }
-
   async function saveDraft(finalize = false, markLow = false, onVerified?: (record: ProductionItem) => void) {
     if (!doc || !canSaveDraft) return
     const markdown = doc.markdown
-    if (finalize && (!markdown.trim() || (video && renderDataIssue(parsedRemotion)))) return
+    if (finalize && !markdown.trim()) return
     await run('saving', async () => {
       display(finalize ? '正在定稿…' : '正在保存草稿…')
       try {
         const saved = await api.updateProductionItem(id, {
           draft_md: markdown,
           ...(writeScript ? { video_script: script } : {}),
-          ...(writeRemotion ? { remotion_data: parsedRemotion.value } : {}),
+          ...(writeRemotion ? { remotion_data: remotionWriteValue(parsedRemotion.value) } : {}),
           ...(finalize ? {
             final_md: markdown, final_content: markdown, workflow_status: '已定稿' as const,
             ...(markLow ? { compliance_risk: '低风险' } : {}),
@@ -554,8 +537,8 @@ export function useWorkbench(
   }
 
   return {
-    doc, note, setNote, dirty, pending, watching, operation, notice, copyNotice, canSave, canPublish, canRewrite, canToggleBenchmark,
-    refresh, edit, save, publish, rewrite, toggleBenchmark, copy, adoptIncoming, restoreBackup,
+    doc, note, setNote, dirty, pending, watching, operation, notice, copyNotice, canPublish, canRewrite, canToggleBenchmark,
+    refresh, edit, publish, rewrite, toggleBenchmark, copy, adoptIncoming, restoreBackup,
     script, remotion, parsedRemotion, canSaveDraft, canPolish, saveDraft, polish, editScript, editRemotion,
   }
 }
