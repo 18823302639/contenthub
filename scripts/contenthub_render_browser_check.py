@@ -143,6 +143,108 @@ def check_rendering(page, base, workflow, media_file, touch):
     print(f"PASS {page.viewport_size['width']}px 同任务迟到或重复回读保留已确认成片", flush=True)
 
 
+
+def check_unknown_submission(page, base, workflow, from_drawer, transport):
+    def open_entry(drawer):
+        if drawer:
+            page.goto(f"{base}/#/topics")
+            card = page.get_by_role("article", name="合成渲染测试稿")
+            button(card, "打开工作台").click()
+            editor = page.get_by_role("dialog", name="内容精修工作台")
+        else:
+            page.goto(f"{base}/#/workbench/6")
+            editor = page
+        panel = editor.get_by_role("region", name="渲染状态与成片")
+        expect(panel).to_be_visible()
+        return editor, panel
+
+    def reread(panel):
+        refresh = button(panel, "刷新渲染状态")
+        with page.expect_response(lambda response: response.url.endswith(RECORDS + "/6")):
+            refresh.click()
+        expect(refresh).to_be_enabled()
+
+    editor, panel = open_entry(from_drawer)
+    with page.expect_request(lambda request: request.url.endswith(RENDER) and request.method == "POST"):
+        button(editor, "重试 Remotion 渲染").click()
+    expect(editor.get_by_role("alert").filter(has_text=re.compile("504|未收到响应|提交结果未知"))).to_be_visible()
+    assert workflow.requests == [{"record_id": 6}]
+
+    editor, panel = open_entry(not from_drawer)
+    reread(panel)
+    submit = editor.get_by_role("button", name=re.compile("Remotion 渲染"))
+    if submit.is_enabled():
+        with page.expect_request(lambda request: request.url.endswith(RENDER) and request.method == "POST"):
+            submit.click()
+    assert workflow.requests == [{"record_id": 6}], f"{transport}: ambiguous acceptance allowed a second render POST"
+    expect(submit).to_be_disabled()
+    expect(panel.get_by_text(re.compile("提交结果未知"))).to_be_visible()
+
+    workflow.failed_reads = 1
+    reread(panel)
+    expect(panel.get_by_role("alert")).to_contain_text("渲染状态读取失败")
+    expect(submit).to_be_disabled()
+
+    # A delayed previous-job result must not release this attempt.
+    workflow.row.update(render_status="completed", video_url="/media/retired.mp4")
+    reread(panel)
+    expect(submit).to_be_disabled()
+    expect(panel.get_by_role("link", name="下载视频")).to_have_count(0)
+    assert workflow.requests == [{"record_id": 6}]
+
+    workflow.row.update(render_job_id="qa-current", render_status="rendering", video_url="")
+    reread(panel)
+    expect(panel.get_by_text("qa-current", exact=True)).to_be_visible()
+    expect(submit).to_be_disabled()
+    assert workflow.requests == [{"record_id": 6}]
+
+    workflow.row.update(render_job_id="qa-old", render_status="failed")
+    reread(panel)
+    expect(submit).to_be_disabled()
+    expect(panel.get_by_text("qa-current", exact=True)).to_be_visible()
+
+    workflow.row.update(render_job_id="qa-current", render_status="failed", render_error="合成当前任务失败")
+    reread(panel)
+    expect(panel.get_by_role("alert")).to_contain_text("合成当前任务失败")
+    expect(button(editor, "重试 Remotion 渲染")).to_be_enabled()
+    assert workflow.requests == [{"record_id": 6}]
+    with page.expect_request(lambda request: request.url.endswith(RENDER) and request.method == "POST"):
+        button(editor, "重试 Remotion 渲染").click()
+    assert workflow.requests == [{"record_id": 6}, {"record_id": 6}]
+    assert not workflow.unexpected, workflow.unexpected
+    print(f"PASS {transport} 跨入口仅一次 POST、旧终态与 GET 失败保持保护、确认当前任务失败后可重试", flush=True)
+
+
+class UnknownWorkflow(Workflow):
+    def __init__(self, base, transport):
+        super().__init__(base)
+        self.transport = transport
+
+    def route(self, route):
+        request = route.request
+        url = urlsplit(request.url)
+        if ((url.scheme, url.netloc) == (self.base.scheme, self.base.netloc)
+                and request.method == "POST" and url.path == RENDER and not self.requests):
+            self.requests.append(request.post_data_json)
+            if self.transport == "504":
+                route.fulfill(status=504, json={"message": "accepted upstream, response timed out"})
+            else:
+                route.abort("connectionreset")
+            return
+        super().route(route)
+
+
+def run_unknown_cases(browser, base):
+    for from_drawer, transport in ((True, "504"), (False, "disconnect")):
+        context = browser.new_context(viewport={"width": 1440, "height": 900}, service_workers="block")
+        workflow = UnknownWorkflow(base, transport)
+        context.route("**/*", workflow.route)
+        try:
+            check_unknown_submission(context.new_page(), base, workflow, from_drawer, transport)
+        finally:
+            context.close()
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dist", required=True, type=Path)
@@ -156,6 +258,7 @@ def main():
         try:
             base = f"http://127.0.0.1:{server.server_port}"
             with sync_playwright() as playwright, playwright.chromium.launch(chromium_sandbox=True) as browser:
+                run_unknown_cases(browser, base)
                 for width, height in ((1440, 900), (390, 844)):
                     touch = width < 768
                     context = browser.new_context(
