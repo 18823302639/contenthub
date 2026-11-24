@@ -285,6 +285,69 @@ def run_unknown_cases(browser, base):
             context.close()
 
 
+
+class CrossOriginMedia(Workflow):
+    media_origin = "https://render-media.example.invalid"
+    inline = media_origin + "/inline.mp4"
+    attachment = media_origin + "/attachment.mp4"
+
+    def __init__(self, base, media_file):
+        super().__init__(base)
+        self.media_file = media_file
+        self.row.update(render_job_id="qa-external", render_status="completed", video_url=self.inline)
+
+    def route(self, route):
+        if route.request.url in (self.inline, self.attachment):
+            headers = {"Cache-Control": "no-store"}
+            if route.request.url == self.attachment:
+                headers["Content-Disposition"] = 'attachment; filename="contenthub-qa.mp4"'
+            route.fulfill(path=self.media_file, content_type="video/mp4", headers=headers)
+            return
+        super().route(route)
+
+
+def check_cross_origin_download(browser, base, media_file):
+    context = browser.new_context(viewport={"width": 1440, "height": 900},
+                                  accept_downloads=True, service_workers="block")
+    workflow = CrossOriginMedia(base, media_file)
+    context.route("**/*", workflow.route)
+    downloads = []
+    context.on("page", lambda page: page.on("download", downloads.append))
+    try:
+        page = context.new_page()
+        page.goto(f"{base}/#/workbench/6")
+        panel = page.get_by_role("region", name="渲染状态与成片")
+        link = panel.get_by_role("link", name=re.compile("下载视频|打开视频"))
+        expect(link).to_have_attribute("href", workflow.inline)
+        with context.expect_page() as popup:
+            link.click()
+        player = popup.value
+        player.wait_for_url(workflow.inline)
+        player.locator("video").wait_for()
+        assert player.evaluate("document.contentType") == "video/mp4"
+        assert not downloads, "inline cross-origin navigation unexpectedly saved a file"
+        player.close()
+
+        workflow.row["video_url"] = workflow.attachment
+        button(panel, "刷新渲染状态").click()
+        expect(link).to_have_attribute("href", workflow.attachment)
+        link.click()
+        for _ in range(30):
+            if downloads:
+                break
+            page.wait_for_timeout(100)
+        assert len(downloads) == 1, "cross-origin attachment did not generate a browser download event"
+        assert downloads[0].suggested_filename == "contenthub-qa.mp4"
+        assert downloads[0].path().read_bytes() == media_file.read_bytes()
+        assert not workflow.requests and not workflow.unexpected, workflow.unexpected
+        print("PASS 双 origin 区分跨域播放与 attachment 下载，下载文件字节一致", flush=True)
+
+        expect(link).to_have_text("打开视频")
+        assert link.get_attribute("download") is None
+    finally:
+        context.close()
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dist", required=True, type=Path)
@@ -300,6 +363,7 @@ def main():
             with sync_playwright() as playwright, playwright.chromium.launch(chromium_sandbox=True) as browser:
                 run_unknown_cases(browser, base)
                 check_legacy_submission(browser, base)
+                check_cross_origin_download(browser, base, media_file)
                 for width, height in ((1440, 900), (390, 844)):
                     touch = width < 768
                     context = browser.new_context(
