@@ -48,6 +48,7 @@ function press(label: string) {
 
 afterEach(() => {
   cleanup()
+  window.sessionStorage.clear()
   vi.useRealTimers()
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
@@ -152,7 +153,7 @@ describe('改稿台', () => {
   it.each([
     [() => new Response(null, { status: 202 }), /未返回有效任务 ID/],
     [() => new Response(null, { status: 502 }), /HTTP 502/],
-  ])('视频提交结果未确认时给出反馈并恢复按钮', async (response, message) => {
+  ])('旧视频入口提交结果未确认时，重新挂载后仍不能再次提交', async (response, message) => {
     const record = await createContentHubApi({}).getProductionItem(3)
     const fetcher = vi.fn<typeof fetch>().mockImplementation(async (_url, options) =>
       options?.method === 'POST' ? response() : Response.json(record))
@@ -167,7 +168,13 @@ describe('改稿台', () => {
     press('生成视频')
     expect((await screen.findByRole('alert')).textContent).toMatch(message)
     expect(screen.queryByRole('link', { name: '下载成品 MP4' })).toBeNull()
-    expect(screen.getByRole<HTMLButtonElement>('button', { name: '生成视频' }).disabled).toBe(false)
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: '生成视频' }).disabled).toBe(true)
+    cleanup()
+    mount(3, api)
+    await editor()
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: '生成视频' }).disabled).toBe(true)
+    expect(screen.getByRole('alert').textContent).toContain('请先核对 n8n 执行记录')
+    press('生成视频')
     expect(fetcher.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1)
   })
 

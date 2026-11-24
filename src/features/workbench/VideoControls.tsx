@@ -1,6 +1,8 @@
 import { ChevronDown, Download, LoaderCircle, Video } from 'lucide-react'
 import { useId, useState } from 'react'
 import type { ContentHubApi, VideoFormat, VideoVoice } from '../../api'
+import { isDefiniteRenderRejection } from '../../app/renderSubmissionChecks'
+import type { RenderSubmissionChecks } from '../../app/renderSubmissionChecks'
 
 const voiceOptions = [
   { value: 'zh-CN-YunxiNeural', label: '云希 - 沉稳解说男声' },
@@ -14,29 +16,40 @@ type Submission =
   | { phase: 'accepted'; jobId: string; downloadUrl: string | null }
   | { phase: 'error'; message: string }
 
-export function VideoControls({ api, productionId }: { api: ContentHubApi; productionId: number }) {
+const unknownVideo = '视频任务提交结果未知。请先核对 n8n 执行记录，避免重复提交。'
+
+export function VideoControls({ api, productionId, checks }: {
+  api: ContentHubApi; productionId: number; checks: RenderSubmissionChecks
+}) {
   const formatId = useId()
   const voiceId = useId()
   const [format, setFormat] = useState<VideoFormat>('16x9')
   const [voice, setVoice] = useState<VideoVoice>(voiceOptions[0].value)
   const [submission, setSubmission] = useState<Submission | null>(null)
-  const pending = submission?.phase === 'pending'
+  const check = checks.checks['legacy:' + productionId]
+  const pending = submission?.phase === 'pending' || check?.sending === true
+  const message = submission?.phase === 'error' ? submission.message : check && !check.sending ? unknownVideo : null
   const jobId = submission?.phase === 'accepted' ? submission.jobId : null
   const downloadUrl = submission?.phase === 'accepted' ? submission.downloadUrl : null
 
   async function generate() {
     if (pending) return
+    const finish = checks.begin('legacy', productionId)
+    if (!finish) return
     setSubmission({ phase: 'pending' })
     try {
       const receipt = await api.triggerWebhook('generate-video', { production_id: productionId, format, voice })
+      finish(!receipt.jobId)
       if (receipt.jobId) {
         setSubmission({ phase: 'accepted', jobId: receipt.jobId, downloadUrl: receipt.downloadUrl ?? null })
       } else {
         setSubmission({ phase: 'error', message: 'Webhook 已受理，但未返回有效任务 ID。请先核对 n8n 执行记录。' })
       }
     } catch (error) {
-      const detail = error instanceof Error ? ` ${error.message}` : ''
-      setSubmission({ phase: 'error', message: `视频任务提交未确认。${detail} 请先核对 n8n 执行记录。` })
+      const detail = error instanceof Error ? ' ' + error.message : ''
+      const rejected = isDefiniteRenderRejection(error)
+      finish(!rejected)
+      setSubmission({ phase: 'error', message: (rejected ? '视频任务请求被拒绝。' : unknownVideo) + detail })
     }
   }
 
@@ -66,14 +79,14 @@ export function VideoControls({ api, productionId }: { api: ContentHubApi; produ
             <ChevronDown size={14} aria-hidden />
           </div>
         </div>
-        <button type="button" className="button button--secondary" disabled={pending} aria-busy={pending}
+        <button type="button" className="button button--secondary" disabled={pending || Boolean(check)} aria-busy={pending}
           onClick={() => void generate()}>
           {pending ? <LoaderCircle size={15} className="refresh-spinning" aria-hidden /> : <Video size={15} aria-hidden />}
           {pending ? '正在拆解分镜并推送渲染...' : '生成视频'}
         </button>
       </div>
-      {submission?.phase === 'error' && (
-        <p className="topic-feedback topic-feedback--warning wb-video-notice" role="alert">{submission.message}</p>
+      {message && (
+        <p className="topic-feedback topic-feedback--warning wb-video-notice" role="alert">{message}</p>
       )}
       {jobId && (
         <div className="topic-feedback wb-video-notice">

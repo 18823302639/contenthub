@@ -47,7 +47,7 @@ function Placeholder({ title, text }: { title: string; text: string }) {
 }
 
 export function ContentHubApp({ api }: { api: ContentHubApi }) {
-  const writes = useRecordWrites()
+  const writes = useRecordWrites(api.mode === 'real')
   const workbenchSessions = useRef(new Map<number, WorkbenchSession>())
   const board = useTopicBoard(api, writes)
   const sources = useSources(api)
