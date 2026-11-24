@@ -1,0 +1,56 @@
+name: ContentHub Mock browser acceptance
+
+on:
+  push:
+    branches:
+      - qa-mock-dcdb7c5
+
+permissions:
+  contents: read
+
+concurrency:
+  group: contenthub-qa-mock-dcdb7c5
+  cancel-in-progress: true
+
+jobs:
+  chromium:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 12
+    if: github.repository == '18823302639/contenthub' && github.ref == 'refs/heads/qa-mock-dcdb7c5'
+    steps:
+      - name: Check out the QA branch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify the release candidate tree
+        run: |
+          set -euo pipefail
+          expected='d18289e028bb33ae38a5b7740eb0ad8c1b3be3da'
+          candidate="$(git log --format='%H %T' | awk -v want="$expected" '$2 == want && !seen++ {print $1}')"
+          test -n "$candidate"
+          git diff --quiet "$candidate" HEAD -- . ':!.github/workflows/contenthub-mock-browser.yml' ':!scripts/contenthub_mock_browser_check.py'
+          git log -2 --format='%h %s'
+          echo "Candidate dcdb7c5 tree $expected"
+      - name: Set up Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+      - name: Install, check and build the Mock app
+        env:
+          VITE_USE_MOCK: 'true'
+        run: |
+          set -euo pipefail
+          npm ci
+          export CONTENTHUB_BUILD_ENV_DIR="$(mktemp -d "$RUNNER_TEMP/contenthub-empty-env.XXXXXX")"
+          npm run typecheck
+          npm test -- --maxWorkers=2
+          npm run build
+      - name: Install and run sandboxed Chromium
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/contenthub-qa"
+          qa_python="$RUNNER_TEMP/contenthub-qa/bin/python"
+          "$qa_python" -m pip install --no-input --disable-pip-version-check playwright==1.62.0
+          "$qa_python" -m playwright install --with-deps chromium
+          "$qa_python" scripts/contenthub_mock_browser_check.py --dist dist
