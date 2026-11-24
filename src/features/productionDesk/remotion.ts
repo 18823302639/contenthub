@@ -8,15 +8,21 @@ export function parseRemotion(input: string): {
   value: JsonObject | null
   error: string | null
   missingSources: string[]
+  missingYears: string[]
 } {
-  const empty = { value: null, error: null, missingSources: [] }
+  const empty = { value: null, error: null, missingSources: [], missingYears: [] }
   if (!input.trim()) return empty
 
   let value: JsonValue
   try {
     value = JSON.parse(input)
   } catch (error) {
-    return { ...empty, error: 'JSON 语法错误。' + (error instanceof Error ? error.message : '') }
+    const detail = error instanceof Error ? error.message : ''
+    const at = detail.match(/position (\d+)/i)?.[1]
+    const offset = at === undefined ? (/end of (json|input|data)/i.test(detail) ? input.length : null) : Number(at)
+    const lines = offset === null ? null : input.slice(0, offset).split('\n')
+    const position = lines ? `第 ${lines.length} 行第 ${lines.at(-1)!.length + 1} 列 · ` : ''
+    return { ...empty, error: 'JSON 语法错误 · ' + position + detail }
   }
   if (value === null) return empty
   if (typeof value !== 'object' || Array.isArray(value)) {
@@ -24,6 +30,7 @@ export function parseRemotion(input: string): {
   }
 
   const missingSources: string[] = []
+  const missingYears: string[] = []
   for (const key of ['scenes', 'cards'] as const) {
     const rows = value[key]
     if (!Object.hasOwn(value, key)) continue
@@ -32,11 +39,21 @@ export function parseRemotion(input: string): {
       continue
     }
     rows.forEach((item, index) => {
-      const source = item && typeof item === 'object' && !Array.isArray(item) ? item.source : null
-      if (typeof source !== 'string' || !source.trim()) missingSources.push(`${key}[${index}].source`)
+      const row = item && typeof item === 'object' && !Array.isArray(item) ? item : null
+      const path = `${key}[${index}].source`
+      const source = row?.source
+      if (typeof source !== 'string' || !source.trim()) {
+        missingSources.push(path)
+        return
+      }
+      const year = row?.source_year ?? row?.year
+      if (!/(?:19|20)\d{2}/.test(source) &&
+          !((typeof year === 'number' || typeof year === 'string') && /^(?:19|20)\d{2}$/.test(String(year).trim()))) {
+        missingYears.push(path + '（年份）')
+      }
     })
   }
-  return { value, error: null, missingSources }
+  return { value, error: null, missingSources, missingYears }
 }
 
 export function sameRemotion(left: JsonValue | undefined, right: JsonValue | undefined): boolean {

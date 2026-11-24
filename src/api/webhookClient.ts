@@ -1,4 +1,3 @@
-import { externalUrl } from '../utils/externalUrl'
 import { defaultN8nWebhookBase, defaultWf2Url, defaultWf3Url, readProxyPath, wf3NotConfigured } from './config'
 import type { ContentHubEnv } from './config'
 import type { WebhookReceipt, WebhookRequest } from './contracts'
@@ -12,11 +11,16 @@ export class WebhookAuthError extends Error {
 }
 
 function readSignedDownloadUrl(value: unknown): string | null {
-  if (typeof value !== 'string' || !/^https?:\/\/[^/?#]/i.test(value) || /[\s\u0000-\u001f\u007f\\]/u.test(value)) {
+  if (typeof value !== 'string' || !/^https:\/\/[^/?#]/i.test(value) || /[\s\u0000-\u001f\u007f\\]/u.test(value)) {
     return null
   }
-  // 只验证地址，保留签名链接原始字符串。
-  return externalUrl(value) ? value : null
+  try {
+    const url = new URL(value)
+    // 只验证地址，保留签名链接原始字符串。
+    return url.username || url.password ? null : value
+  } catch {
+    return null
+  }
 }
 
 export function createWebhookClient(env: ContentHubEnv, fetcher: typeof fetch) {
@@ -38,12 +42,21 @@ export function createWebhookClient(env: ContentHubEnv, fetcher: typeof fetch) {
   return {
     async triggerWebhook(...[action, payload]: WebhookRequest): Promise<WebhookReceipt> {
       const base = readProxyPath(env.VITE_N8N_WEBHOOK_BASE_URL?.trim() || defaultN8nWebhookBase, 'VITE_N8N_WEBHOOK_BASE_URL')
-      const response = await post(`${base}/${action}`, payload, action === 'rss-sync-now' ? '采集' : undefined)
+      const response = await post(`${base}/${action}`, payload, action === 'rss-sync-now' ? '采集' : action === 'rewrite-draft' ? 'AI 改稿' : undefined)
       const receipt: WebhookReceipt = { accepted: true, status: response.status }
       if (action === 'generate-video') {
         const body: { jobId?: unknown; downloadUrl?: unknown } | null = await response.json().catch(() => null)
         if (typeof body?.jobId === 'string' && body.jobId.trim()) receipt.jobId = body.jobId.trim()
         receipt.downloadUrl = readSignedDownloadUrl(body?.downloadUrl)
+      }
+      if (action === 'rewrite-draft') {
+        const json: unknown = await response.json().catch(() => null)
+        const body = Array.isArray(json) ? json[0] : json
+        if (body && typeof body === 'object') {
+          const { draft_md, video_script } = body as Record<string, unknown>
+          if (typeof draft_md === 'string' && draft_md.trim()) receipt.draft_md = draft_md
+          if (typeof video_script === 'string' && video_script.trim()) receipt.video_script = video_script
+        }
       }
       return receipt
     },

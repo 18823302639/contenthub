@@ -30,7 +30,7 @@ export type VideoVoice =
 
 export interface WebhookPayloads {
   'fetch-and-draft': { production_id: number }
-  'rewrite-draft': { production_id: number; revision_note: string }
+  'rewrite-draft': { production_id: number; revision_note: string; draft_md?: string; video_script?: string }
   'generate-video': { production_id: number; format: VideoFormat; voice: VideoVoice }
   'rss-sync-now': Record<string, never>
 }
@@ -45,11 +45,13 @@ export interface WebhookReceipt {
   status: number
   jobId?: string
   downloadUrl?: string | null
+  draft_md?: string
+  video_script?: string
 }
 
 export interface ContentHubApi {
   readonly mode: 'mock' | 'real'
-  listProductionItems(filters?: ProductionFilters): Promise<ProductionItem[]>
+  listProductionItems(filters?: ProductionFilters, onTotalRows?: (total: number) => void): Promise<ProductionItem[]>
   getProductionItem(id: number): Promise<ProductionItem>
   updateProductionItem(id: number, changes: ProductionUpdate): Promise<ProductionItem>
   listRssSources(poolType?: PoolType): Promise<RssSource[]>
@@ -65,7 +67,6 @@ export interface ContentHubApi {
   triggerWebhook(...request: WebhookRequest): Promise<WebhookReceipt>
   triggerGenerateDraft(recordId: number): Promise<WebhookReceipt>
   triggerRender(recordId: number): Promise<WebhookReceipt>
-  probeVideoDownload(downloadUrl: string, signal: AbortSignal): Promise<boolean>
 }
 
 export interface Tables {
@@ -82,7 +83,7 @@ type NewRecords = { rss_sources: NewRssSource; account_metrics: NewAccountMetric
 export type TableName = keyof Tables
 
 export interface RecordStore {
-  list<T extends TableName>(table: T): Promise<Tables[T][]>
+  list<T extends TableName>(table: T, onTotalRows?: (total: number) => void): Promise<Tables[T][]>
   get<T extends TableName>(table: T, id: number): Promise<Tables[T]>
   create<T extends keyof NewRecords>(table: T, fields: NewRecords[T]): Promise<Tables[T]>
   update<T extends TableName>(table: T, id: number, changes: Partial<Omit<Tables[T], 'id'>>): Promise<Tables[T]>

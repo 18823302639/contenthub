@@ -562,8 +562,8 @@ describe('n8n Webhook', () => {
 
   const videoPayload = { production_id: 7, format: '16x9', voice: 'zh-CN-YunxiNeural' } as const
 
-  it('视频回执保留合法 HTTP 下载地址原文', async () => {
-    const downloadUrl = 'http://render.example.invalid:3100/file/7?sig=fake%2b%2F&ttl=86400'
+  it('视频回执保留合法 HTTPS 下载地址原文', async () => {
+    const downloadUrl = 'https://Render.Example.invalid:443/file/7?sig=fake%2b%2F&part=1&part=2&ttl=86400'
     const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(Response.json({ jobId: 'job-1', downloadUrl }))
     await expect(createContentHubApi(env, fetcher).triggerWebhook('generate-video', videoPayload))
       .resolves.toEqual({ accepted: true, status: 200, jobId: 'job-1', downloadUrl })
@@ -575,6 +575,8 @@ describe('n8n Webhook', () => {
     ['畸形地址', 'https://[invalid'],
     ['缺少主机名', 'https:///file.mp4'],
     ['相对地址', '//render.example.invalid/file.mp4'],
+    ['HTTP 地址', 'http://render.example.invalid/file.mp4?sig=fake'],
+    ['嵌入了账号凭据的地址', 'https://viewer:fake@render.example.invalid/file.mp4?sig=fake'],
     ['JavaScript 地址', 'javascript:alert(1)'],
     ['带空白字符的地址', 'https://render.example.invalid/file.mp4?sig=bad\tvalue'],
   ])('视频回执中的%s不影响有效任务 ID', async (_label, downloadUrl) => {

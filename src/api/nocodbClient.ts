@@ -85,17 +85,22 @@ export function createNocodbClient(env: ContentHubEnv, fetcher: typeof fetch): R
   }
 
   return {
-    async list(table) {
+    async list(table, onTotalRows) {
       const url = recordsUrl(table)
       const rows: Tables[typeof table][] = []
       const seen = new Set<number>()
       let offset = 0
+      let totalRows: number | undefined
 
       while (true) {
         const query = new URLSearchParams({ offset: String(offset), limit: String(pageLimit), sort: idField })
         const response = await send(`${url}?${query}`, 'GET')
         const page = asObject(await response.json())
-        const { isLastPage } = asObject(page.pageInfo)
+        const { isLastPage, totalRows: reported } = asObject(page.pageInfo)
+        const count = typeof reported === 'string' && /^\d+$/.test(reported) ? Number(reported) : reported
+        if (totalRows === undefined && typeof count === 'number' && Number.isSafeInteger(count) && count >= 0) {
+          totalRows = count
+        }
         if (!Array.isArray(page.list) || typeof isLastPage !== 'boolean') {
           throw new Error('NocoDB 分页响应必须包含 list 和 pageInfo.isLastPage。')
         }
@@ -113,7 +118,10 @@ export function createNocodbClient(env: ContentHubEnv, fetcher: typeof fetch): R
           seen.add(row.id)
           rows.push(row)
         }
-        if (isLastPage) return rows
+        if (isLastPage) {
+          onTotalRows?.(totalRows ?? offset + page.list.length)
+          return rows
+        }
         if (page.list.length === 0) throw new Error('NocoDB 分页未前进，请检查真实部署的响应。')
         offset += page.list.length
       }

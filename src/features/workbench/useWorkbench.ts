@@ -5,11 +5,16 @@ import { WriteReadbackError } from '../../api'
 import type { ContentHubApi } from '../../api'
 import { pollWorkflow } from '../../api/workflowPolling'
 import type { ProductionItem } from '../../types/schema'
+import { needsRemotion, renderDataIssue } from '../productionDesk/editingRules'
+import { parseRemotion, remotionText, sameRemotion } from '../productionDesk/remotion'
+import { requestAiDraft } from './requestAiDraft'
 import { renderMarkdownHtml } from './MarkdownPreview'
 
 interface WorkingDocument {
   record: ProductionItem
   markdown: string
+  script?: string
+  remotion?: string
   incoming: string | null
   preferredDraft: string | null
   backups: string[]
@@ -37,7 +42,7 @@ export interface WorkbenchSession {
   generation: number
 }
 
-type Operation = 'reading' | 'saving' | 'publishing' | 'rewriting' | 'benchmarking'
+type Operation = 'reading' | 'saving' | 'publishing' | 'rewriting' | 'benchmarking' | 'polishing'
 
 const rewriteStatus = '需AI润色'
 const rewriteAccepted = 'Webhook 已受理，等待改稿回写。'
@@ -61,13 +66,17 @@ function mergeRecord(current: WorkingDocument | null, record: ProductionItem, su
     : null
   const latest = preferredDraft ?? savedMarkdown(record)
   const backups = current?.backups ?? []
+  const script = current?.script !== undefined && current.script !== (current.record.video_script ?? '')
+    ? current.script : record.video_script
+  const remotion = current?.remotion !== undefined && current.remotion !== remotionText(current.record.remotion_data)
+    ? current.remotion : remotionText(record.remotion_data)
   if (!current || (submitted === undefined && current.markdown === displayedMarkdown(current))) {
-    return { record, markdown: latest, incoming: null, preferredDraft, backups }
+    return { record, markdown: latest, script, remotion, incoming: null, preferredDraft, backups }
   }
 
   const hasIncoming = current.markdown !== latest && latest !== submitted &&
     (current.incoming !== null || latest !== displayedMarkdown(current))
-  return { record, markdown: current.markdown, incoming: hasIncoming ? latest : null, preferredDraft, backups }
+  return { record, markdown: current.markdown, script, remotion, incoming: hasIncoming ? latest : null, preferredDraft, backups }
 }
 
 function withDraft(current: WorkingDocument | null, record: ProductionItem, draft: string): WorkingDocument {
@@ -75,7 +84,7 @@ function withDraft(current: WorkingDocument | null, record: ProductionItem, draf
   const shouldBackUp = current && current.markdown !== displayedMarkdown(current) &&
     current.markdown !== draft && !backups.includes(current.markdown)
   return {
-    record, markdown: draft, preferredDraft: draft, incoming: null,
+    ...mergeRecord(current, record), markdown: draft, preferredDraft: draft, incoming: null,
     backups: shouldBackUp ? [...backups, current.markdown] : backups,
   }
 }
@@ -172,7 +181,18 @@ export function useWorkbench(
   }, [id, read, session, sessions])
 
   const record = doc?.record
-  const dirty = Boolean(doc && doc.markdown !== savedMarkdown(doc.record))
+  const script = doc?.script ?? record?.video_script ?? ''
+  const remotion = doc?.remotion ?? remotionText(record?.remotion_data)
+  const savedRemotion = remotionText(record?.remotion_data)
+  const changedRemotion = remotion !== savedRemotion && (() => {
+    const edited = parseRemotion(remotion)
+    const saved = parseRemotion(savedRemotion)
+    return Boolean(edited.error || saved.error) || !sameRemotion(edited.value, saved.value)
+  })()
+  const dirty = Boolean(doc && (
+    (doc.markdown !== savedMarkdown(doc.record) && doc.markdown !== (doc.record.draft_md ?? '')) ||
+    script !== (record?.video_script ?? '') || changedRemotion
+  ))
   const pending = record?.workflow_status === rewriteStatus || record?.workflow_status === '已确认-待核对'
   const terminal = record?.workflow_status === '已发布' || record?.workflow_status === '已放弃'
   const canChangeStatus = record !== undefined && isWorkflowStatus(record.workflow_status) && !terminal
@@ -182,6 +202,8 @@ export function useWorkbench(
   const canPublish = Boolean(record?.final_md?.trim()) && !dirty && !blocked && canChangeStatus
   const canRewrite = Boolean(doc?.markdown.trim()) && !dirty && !blocked && canChangeStatus
   const canToggleBenchmark = Boolean(record) && !blocked
+  const canPolish = !blocked && canChangeStatus && Boolean(doc?.markdown.trim() || script.trim())
+  const canSaveDraft = !blocked && Boolean(doc?.markdown.trim())
 
   function display(text: string, error = false) {
     if (live.current) setNotice({ text, error })
@@ -322,6 +344,82 @@ export function useWorkbench(
     })
   }
 
+  async function saveDraft(finalize = false, markLow = false, onVerified?: (record: ProductionItem) => void) {
+    if (!doc || !canSaveDraft) return
+    const video = needsRemotion(doc.record)
+    const parsed = parseRemotion(remotion)
+    if (video && (parsed.error || (finalize && renderDataIssue(parsed)))) return
+    const markdown = doc.markdown
+    await run('saving', async () => {
+      display(finalize ? '正在定稿…' : '正在保存草稿…')
+      try {
+        const saved = await api.updateProductionItem(id, {
+          draft_md: markdown,
+          ...(video ? { video_script: script, remotion_data: parsed.value } : {}),
+          ...(finalize ? {
+            final_md: markdown, final_content: markdown, workflow_status: '已定稿' as const,
+            ...(markLow ? { compliance_risk: '低风险' } : {}),
+          } : {}),
+        })
+        acceptWrite(saved, markdown)
+        if (saved.draft_md !== markdown || (video && ((saved.video_script ?? '') !== script ||
+            !sameRemotion(parseRemotion(remotionText(saved.remotion_data)).value, parsed.value))) ||
+            (finalize && (saved.workflow_status !== '已定稿' || saved.final_md !== markdown || saved.final_content !== markdown ||
+              (markLow && saved.compliance_risk !== '低风险' && saved.compliance_risk !== '低')))) {
+          display('写入结果与回读不一致，当前编辑已保留。', true)
+          return
+        }
+        updateDocument(current => current && {
+          ...current, preferredDraft: finalize ? null : markdown,
+          remotion: current.remotion === remotion ? remotionText(saved.remotion_data) : current.remotion,
+        })
+        onVerified?.(saved)
+        display(finalize ? '已保存并定稿。' : '草稿已保存。')
+      } catch (error) {
+        writeUnverified(error)
+      }
+    })
+  }
+
+  async function polish(revision: string) {
+    if (!doc || !canPolish) return
+    const original = doc
+    await run('polishing', async () => {
+      display('正在请求 AI 挑刺去味…')
+      try {
+        const video = needsRemotion(original.record)
+        const result = await requestAiDraft(api, id, original.markdown, video ? script : '', revision)
+        if (!result.article && (!video || !result.script)) throw new Error('回执未包含当前赛道可用的稿件。')
+        let conflicted = false
+        updateDocument(current => {
+          if (!current) return current
+          const textChanged = current.markdown !== original.markdown
+          const scriptChanged = (current.script ?? current.record.video_script ?? '') !== script
+          conflicted = Boolean((result.article && textChanged) || (video && result.script && scriptChanged))
+          return {
+            ...current,
+            markdown: textChanged ? current.markdown : result.article ?? current.markdown,
+            incoming: textChanged ? result.article ?? current.incoming : null,
+            script: video && !scriptChanged ? result.script ?? current.script : current.script,
+            backups: result.article && !textChanged && current.markdown !== displayedMarkdown(current) &&
+              !current.backups.includes(current.markdown) ? [...current.backups, current.markdown] : current.backups,
+          }
+        })
+        display(conflicted ? 'AI 已返回稿件。提交后的人工编辑已保留，可在回写稿中核对正文。' : 'AI 改稿已写入草稿，请人工核对')
+      } catch (error) {
+        display(errorMessage(error), true)
+      }
+    })
+  }
+
+  function editScript(value: string) {
+    updateDocument(current => current && { ...current, script: value })
+  }
+
+  function editRemotion(value: string) {
+    updateDocument(current => current && { ...current, remotion: value })
+  }
+
   async function publish() {
     if (!canPublish) return
     await run('publishing', async () => {
@@ -452,5 +550,6 @@ export function useWorkbench(
   return {
     doc, note, setNote, dirty, pending, watching, operation, notice, copyNotice, canSave, canPublish, canRewrite, canToggleBenchmark,
     refresh, edit, save, publish, rewrite, toggleBenchmark, copy, adoptIncoming, restoreBackup,
+    script, remotion, canSaveDraft, canPolish, saveDraft, polish, editScript, editRemotion,
   }
 }

@@ -1,4 +1,4 @@
-import { Copy, LoaderCircle, X } from 'lucide-react'
+import { Copy, LoaderCircle, Sparkles, X } from 'lucide-react'
 import { useEffect, useId, useRef, useState } from 'react'
 import type { ContentHubApi, ProductionUpdate } from '../../api'
 import type { RecordWrites } from '../../app/useRecordWrites'
@@ -6,6 +6,10 @@ import { productionRiskLabel } from '../../types/schema'
 import type { ProductionItem } from '../../types/schema'
 import { externalUrl } from '../../utils/externalUrl'
 import { MarkdownPreview, renderMarkdownHtml } from '../workbench/MarkdownPreview'
+import { useUnsavedChanges } from '../../app/UnsavedChanges'
+import { requestAiDraft } from '../workbench/requestAiDraft'
+import { editorialWarnings, needsRemotion, renderDataIssue, renderRecordIsCurrent, reviewIssue } from './editingRules'
+import { RenderResults, useRenderResults } from './RenderResults'
 import { ComplianceBanner } from './ComplianceBanner'
 import { parseRemotion, remotionText, sameRemotion } from './remotion'
 import './productionDesk.css'
@@ -17,7 +21,7 @@ const tabs = [
   { id: 'sources', label: '原始信源与大纲', video: false },
 ] as const
 type TabId = (typeof tabs)[number]['id']
-type Operation = 'save' | 'finalize' | 'render'
+type Operation = 'save' | 'finalize' | 'render' | 'rewrite'
 type Notice = { text: string; error?: boolean }
 
 function fields(record: ProductionItem) {
@@ -82,32 +86,45 @@ function DeskEditor({ api, record: initial, writes, onSaved, requestClose, regis
   const [record, setRecord] = useState(initial)
   const [values, setValues] = useState(() => fields(initial))
   const [tab, selectTab] = useState<TabId>('article')
-  const [markLow, setMarkLow] = useState(false)
+  const [reviewTicket, setReviewTicket] = useState<string | null>(null)
+  const [reviewedFields, setReviewedFields] = useState<string | null>(null)
+  const [revisionNote, setRevisionNote] = useState('')
   const [operation, setOperation] = useState<Operation | null>(null)
   const [notice, setNotice] = useState<Notice | null>(null)
-  const main = record.track_tag === 'main_overseas'
+  const main = needsRemotion(record)
+  const render = useRenderResults(api, record, main)
   const enabledTabs = tabs.filter(option => !option.video || main)
   const parsed = parseRemotion(values.remotion)
-  const sourceIssues = parsed.missingSources.join('、')
+  const jsonIssue = main ? renderDataIssue(parsed) : null
+  const warnings = editorialWarnings(values)
+  const fieldsKey = JSON.stringify(values)
+  const markLow = fieldsKey === reviewTicket
+  const approvalIssue = reviewIssue(record, warnings, markLow || reviewedFields === fieldsKey)
   const locked = writes.lockedIds.has(record.id)
   const busy = operation !== null || locked || record.workflow_status === '生成中'
   const original = fields(record)
-  const dirty = markLow || Object.keys(values).some(key => values[key as keyof typeof values] !== original[key as keyof typeof values])
-  const savedRender = parseRemotion(original.remotion)
-  const renderReason = parsed.error || (!parsed.value ? '请先填写 Remotion JSON。' : null) ||
-    (sourceIssues ? '请补齐渲染来源：' + sourceIssues : null) ||
-    (productionRiskLabel(record.compliance_risk) === '高风险' ? '高风险稿件需先人工复核并降低风险等级。' : null) ||
-    (!sameRemotion(savedRender.value, parsed.value) ? '请先保存当前渲染数据。' : null)
+  const originalRender = parseRemotion(original.remotion)
+  const remotionChanged = values.remotion !== original.remotion &&
+    (Boolean(parsed.error || originalRender.error) || !sameRemotion(parsed.value, originalRender.value))
+  const changed = values.title !== original.title || values.article !== original.article ||
+    values.script !== original.script || remotionChanged
+  const dirty = markLow || changed
+  useUnsavedChanges(dirty)
+  const finalizeReason = approvalIssue || jsonIssue ||
+    (!values.title.trim() || !values.article.trim() ? '定稿需要中文标题和图文正文。' : null)
+  const renderReason = approvalIssue || jsonIssue ||
+    (productionRiskLabel(record.compliance_risk) === '高风险' ? '请先用人工复核操作保存低风险等级。' : null) ||
+    (changed ? '请先保存当前草稿和渲染数据。' : null) ||
+    (render.phase === 'rendering' ? '已在渲染，请等待本次结果。' : null)
   const saveDisabled = busy || (main && Boolean(parsed.error))
-  const canFinalize = Boolean(values.title.trim() && values.article.trim())
   const seconds = Math.ceil(length(values.script) * 60 / 260)
   const activeTab = enabledTabs.some(option => option.id === tab) ? tab : 'article'
-  const jsonIssueVisible = activeTab === 'remotion' && Boolean(parsed.error || sourceIssues)
-  const renderReasonId = group + (jsonIssueVisible ? '-json-issues' : '-render-reason')
+  const finalizeReasonId = group + '-finalize-reason'
+  const renderReasonId = group + '-render-reason'
 
   useEffect(() => {
     registerClose(() => {
-      if (operation === 'save' || operation === 'finalize') return
+      if (operation !== null) return
       if (!dirty || window.confirm('尚有未保存的修改，确定关闭工作台吗？')) requestClose()
     })
   }, [dirty, operation, registerClose, requestClose])
@@ -126,7 +143,7 @@ function DeskEditor({ api, record: initial, writes, onSaved, requestClose, regis
   }
 
   async function save(finalize: boolean) {
-    if (saveDisabled || (finalize && !canFinalize)) return
+    if (saveDisabled || (finalize && finalizeReason)) return
     const release = writes.acquire(record.id)
     if (!release) return
     const patch: ProductionUpdate = { zh_title: values.title.trim(), draft_md: values.article }
@@ -147,7 +164,10 @@ function DeskEditor({ api, record: initial, writes, onSaved, requestClose, regis
         return
       }
       setValues(fields(updated))
-      if (finalize) setMarkLow(false)
+      if (finalize) {
+        if (markLow) setReviewedFields(JSON.stringify(fields(updated)))
+        setReviewTicket(null)
+      }
       setNotice({ text: finalize ? '已保存并定稿' : '草稿已保存' })
     } catch (error) {
       setNotice({ text: '保存结果未确认。' + message(error), error: true })
@@ -165,15 +185,35 @@ function DeskEditor({ api, record: initial, writes, onSaved, requestClose, regis
     setOperation('render')
     try {
       const latest = await api.getProductionItem(record.id)
-      const latestRemotion = parseRemotion(remotionText(latest.remotion_data))
-      if (latest.track_tag !== 'main_overseas' || productionRiskLabel(latest.compliance_risk) === '高风险' ||
-          latestRemotion.error || latestRemotion.missingSources.length || !sameRemotion(latestRemotion.value, parsed.value)) {
+      if (!renderRecordIsCurrent(record, latest, parsed)) {
         setRecord(latest)
         setNotice({ text: '记录已更新或不满足渲染条件。请核对风险等级和已保存的渲染数据。', error: true })
         return
       }
       await api.triggerRender(record.id)
+      render.accepted(latest)
       setNotice({ text: 'Remotion 渲染请求已受理' })
+    } catch (error) {
+      setNotice({ text: message(error), error: true })
+    } finally {
+      setOperation(null)
+      release()
+    }
+  }
+
+  async function rewrite() {
+    if (busy || (!values.article.trim() && !values.script.trim())) return
+    const release = writes.acquire(record.id)
+    if (!release) return
+    setNotice(null)
+    setOperation('rewrite')
+    try {
+      const draft = await requestAiDraft(api, record.id, values.article, main ? values.script : '', revisionNote)
+      if (!draft.article && (!main || !draft.script)) throw new Error('回执未包含当前赛道可用的稿件。')
+      setValues(current => ({
+        ...current, article: draft.article ?? current.article, script: main ? draft.script ?? current.script : current.script,
+      }))
+      setNotice({ text: 'AI 改稿已写入草稿，请人工核对' })
     } catch (error) {
       setNotice({ text: message(error), error: true })
     } finally {
@@ -186,6 +226,9 @@ function DeskEditor({ api, record: initial, writes, onSaved, requestClose, regis
     <>
       <div className="desk-body">
         <ComplianceBanner record={record} />
+        {warnings.length > 0 && <p className="topic-feedback topic-feedback--warning" role="status">
+          高危词待核对 · {warnings.join('；')}
+        </p>}
         <span className="desk-status">{record.track_tag || '未标注赛道'} · {record.workflow_status || '未标注状态'} · {productionRiskLabel(record.compliance_risk) ?? (record.compliance_risk || '风险未标注')}</span>
         <div className="desk-title">
           <label htmlFor={group + '-title'}>中文标题</label>
@@ -255,35 +298,47 @@ function DeskEditor({ api, record: initial, writes, onSaved, requestClose, regis
                 <button className="button button--secondary" type="button" disabled={busy || !parsed.value}
                   onClick={() => change('remotion', JSON.stringify(parsed.value, null, 2))}>格式化 JSON</button>
               </div>
-              {(parsed.error || sourceIssues) && <p id={group + '-json-issues'} className="topic-feedback topic-feedback--warning" role="alert">
-                {parsed.error || '缺少非空来源：' + sourceIssues}
+              {jsonIssue && <p id={group + '-json-issues'} className="topic-feedback topic-feedback--warning" role="alert">
+                {jsonIssue}
               </p>}
               <textarea className="desk-json" spellCheck={false} id={group + '-json-editor'} value={values.remotion} disabled={busy}
-                aria-invalid={Boolean(parsed.error || sourceIssues)}
-                aria-describedby={parsed.error || sourceIssues ? group + '-json-issues' : undefined}
+                aria-invalid={Boolean(jsonIssue)}
+                aria-describedby={jsonIssue ? group + '-json-issues' : undefined}
                 onChange={event => change('remotion', event.target.value)} />
             </>
           )}
           {activeTab === 'sources' && <SourceReference record={record} />}
         </div>
+        {main && <RenderResults model={render} />}
       </div>
 
       <footer className="desk-footer">
         {notice && <p className={'topic-feedback' + (notice.error ? ' topic-feedback--warning' : '')}
           role={notice.error ? 'alert' : 'status'}>{notice.text}</p>}
-        {main && renderReason && !jsonIssueVisible && <small className="desk-muted" id={renderReasonId}>{renderReason}</small>}
+        {finalizeReason && <small className="desk-muted" id={finalizeReasonId}>{finalizeReason}</small>}
+        {main && renderReason && renderReason !== finalizeReason && <small className="desk-muted" id={renderReasonId}>{renderReason}</small>}
+        <div className="desk-ai">
+          <label htmlFor={group + '-revision'}>修改侧重点（可选）</label>
+          <input id={group + '-revision'} value={revisionNote} disabled={busy}
+            onChange={event => setRevisionNote(event.target.value)} placeholder="例如强化开头的数据对比" />
+          <button type="button" className="button button--secondary" aria-busy={operation === 'rewrite'}
+            disabled={busy || (!values.article.trim() && !values.script.trim())} onClick={() => void rewrite()}>
+            <Sparkles size={15} aria-hidden />{operation === 'rewrite' ? 'AI 改稿中…' : 'AI 挑刺去味'}
+          </button>
+        </div>
         <div className="desk-actions">
-          <label><input type="checkbox" checked={markLow} disabled={busy} onChange={event => setMarkLow(event.target.checked)} />
+          <label><input type="checkbox" checked={markLow} disabled={busy} onChange={event => setReviewTicket(event.target.checked ? fieldsKey : null)} />
             人工复核后将风险改为低风险
           </label>
+          {dirty && <span className="wb-dirty" role="status">未保存</span>}
           <button type="button" className="button button--secondary" disabled={saveDisabled}
             onClick={() => void save(false)}>{operation === 'save' ? '正在保存…' : '保存草稿'}</button>
-          <button type="button" className="button button--primary" disabled={saveDisabled || !canFinalize}
-            title={!canFinalize ? '定稿需要中文标题和图文正文' : undefined}
+          <button type="button" className="button button--primary" disabled={saveDisabled || Boolean(finalizeReason)}
+            aria-describedby={finalizeReason ? finalizeReasonId : undefined}
             onClick={() => void save(true)}>{operation === 'finalize' ? '正在定稿…' : '人工复核通过并定稿'}</button>
           {main && (
             <span title={renderReason ?? undefined} tabIndex={renderReason ? 0 : undefined}
-              aria-describedby={renderReason ? renderReasonId : undefined}>
+              aria-describedby={renderReason ? (renderReason === finalizeReason ? finalizeReasonId : renderReasonId) : undefined}>
               <button type="button" className="button button--secondary" disabled={busy || Boolean(renderReason)}
                 onClick={() => void renderVideo()}>{operation === 'render' ? '正在提交…' : '提交 Remotion 渲染'}</button>
             </span>

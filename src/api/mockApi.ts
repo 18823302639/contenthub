@@ -24,14 +24,15 @@ export function createMockBackend() {
 
   function updateProduction(item: ProductionItem, changes: Partial<ProductionItem>) {
     const index = data.production_pool.indexOf(item)
-    const updated = { ...item, ...changes }
+    const updated = { ...item, ...changes, updated_at: new Date().toISOString() }
     data.production_pool[index] = updated
     return updated
   }
 
   const store: RecordStore = {
-    async list(table) {
+    async list(table, onTotalRows) {
       await delay()
+      onTotalRows?.(data[table].length)
       return structuredClone(data[table])
     },
     async get(table, id) {
@@ -60,7 +61,7 @@ export function createMockBackend() {
       await delay()
       const rows = data[table]
       const row = find(table, id)
-      const updated = { ...row, ...input }
+      const updated = { ...row, ...input, ...(table === 'production_pool' ? { updated_at: new Date().toISOString() } : {}) }
       rows[rows.indexOf(row)] = updated
       return structuredClone(updated)
     },
@@ -76,6 +77,7 @@ export function createMockBackend() {
         setTimeout(() => {
           collecting = false
           data.rss_sync_settings[0].last_synced_at = new Date().toISOString()
+          data.rss_sync_settings[0].last_sync_added_count = 0
         }, workflowDelayMs)
       }
       return { accepted: true, status: 202 }
@@ -90,6 +92,16 @@ export function createMockBackend() {
       }
     }
     if (activeJobs.has(item.id)) throw new Error('这条选题已有模拟任务正在运行。')
+
+    if (action === 'rewrite-draft' && (payload.draft_md !== undefined || payload.video_script !== undefined)) {
+      const revision = payload.revision_note.trim() || '核对开头与冗余表达'
+      return {
+        accepted: true,
+        status: 200,
+        draft_md: payload.draft_md?.trim() ? payload.draft_md + '\n\n【模拟精修】' + revision : undefined,
+        video_script: payload.video_script?.trim() ? payload.video_script + '\n【模拟口播精修】' + revision : undefined,
+      }
+    }
 
     if (action === 'fetch-and-draft' && item.workflow_status !== '已确认-待核对') {
       throw new Error('请先确认选题，再触发模拟初稿。')
@@ -143,7 +155,7 @@ export function createMockBackend() {
         ai_outline: item.ai_outline || '## 提纲\n\n1. 说明样本\n2. 对照数据\n3. 核对来源',
         draft_md: `# ${item.zh_title}\n\n${item.key_data_points}\n\n【模拟】对照数据后列出限制条件。`,
         video_script: mainTrack ? '【模拟口播】这组样本说明了什么？我们先来看原始数据。' : '',
-        remotion_data: mainTrack ? { scenes: [{ source: item.url, text: item.zh_title }], cards: [] } : null,
+        remotion_data: mainTrack ? { scenes: [{ source: item.url, source_year: 2024, text: item.zh_title }], cards: [] } : null,
         compliance_report: { status: 'pass', banned_word_hits: [], prediction_phrase_hits: [], missing_sources: [], suggestion: '复核样本口径。' },
         compliance_risk: '低风险',
       })
@@ -153,7 +165,13 @@ export function createMockBackend() {
 
   async function triggerRender(id: number): Promise<WebhookReceipt> {
     await delay()
-    find('production_pool', id)
+    const item = find('production_pool', id)
+    if (['queued', 'rendering'].includes(item.render_status ?? '')) throw new Error('已有模拟渲染任务。')
+    updateProduction(item, { render_status: 'rendering', render_error: '', video_url: '', cards_urls: [] })
+    setTimeout(() => {
+      const latest = find('production_pool', id)
+      updateProduction(latest, { render_status: 'completed' })
+    }, workflowDelayMs)
     return { accepted: true, status: 202 }
   }
 

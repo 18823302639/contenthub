@@ -166,6 +166,7 @@ const decode: Decoders = {
       id,
       sync_interval_hours: rssSyncIntervals.find(option => option === hours) ?? null,
       last_synced_at: readDate(row, 'last_synced_at') || null,
+      ...(row.last_sync_added_count == null ? {} : { last_sync_added_count: readNumber(row, 'last_sync_added_count', 0) }),
     }
   },
 
@@ -197,6 +198,13 @@ const decode: Decoders = {
       remotion_data: readRemotionData(row.remotion_data),
       is_benchmark: readCheckbox(row, 'is_benchmark'),
       published_at: readDate(row, 'published_at'),
+      updated_at: readDate(row, 'updated_at') || readDate(row, 'UpdatedAt'),
+      need_remotion: row.need_remotion == null ? null : parseCheckbox(row.need_remotion),
+      render_status: readText(row, 'render_status').trim(),
+      video_url: readText(row, 'video_url').trim(),
+      render_error: readText(row, 'render_error'),
+      cards_urls: Array.isArray(row.cards_urls) || typeof row.cards_urls === 'string'
+        ? readTitles(row.cards_urls) : [],
       created_at: readDate(row, 'created_at'),
     }
 

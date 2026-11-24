@@ -1,6 +1,6 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
-import { HashRouter } from 'react-router-dom'
+import { createHashRouter, RouterProvider } from 'react-router-dom'
 import { createContentHubApi } from './api'
 import { ContentHubApp } from './app/ContentHubApp'
 import './styles.css'
@@ -12,11 +12,8 @@ const app = createRoot(root)
 
 try {
   const api = createContentHubApi(__CONTENTHUB_ENV__)
-  app.render(
-    <StrictMode>
-      <HashRouter><ContentHubApp api={api} /></HashRouter>
-    </StrictMode>,
-  )
+  const router = createHashRouter([{ path: '*', element: <ContentHubApp api={api} /> }])
+  app.render(<StrictMode><RouterProvider router={router} /></StrictMode>)
 } catch (error) {
   app.render(
     <main className="startup-error" role="alert">

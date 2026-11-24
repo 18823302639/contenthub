@@ -15,6 +15,8 @@ const statusTones: Record<WorkflowStatus, string> = {
   '已定稿': 'green',
   '已确认-待核对': 'amber',
   'AI初稿完成': 'green',
+  '初稿已生成': 'green',
+  '精修中': 'amber',
   '需AI润色': 'amber',
   '待人工终审': 'violet',
   '已发布': 'green',

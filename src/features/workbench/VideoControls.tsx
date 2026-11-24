@@ -1,7 +1,6 @@
-import { ChevronDown, LoaderCircle, Video } from 'lucide-react'
+import { ChevronDown, Download, LoaderCircle, Video } from 'lucide-react'
 import { useId, useState } from 'react'
 import type { ContentHubApi, VideoFormat, VideoVoice } from '../../api'
-import { VideoRenderNotice } from './VideoRenderNotice'
 
 const voiceOptions = [
   { value: 'zh-CN-YunxiNeural', label: '云希 - 沉稳解说男声' },
@@ -76,13 +75,20 @@ export function VideoControls({ api, productionId }: { api: ContentHubApi; produ
       {submission?.phase === 'error' && (
         <p className="topic-feedback topic-feedback--warning wb-video-notice" role="alert">{submission.message}</p>
       )}
-      {jobId && downloadUrl && <VideoRenderNotice key={jobId} api={api} jobId={jobId} downloadUrl={downloadUrl} />}
-      {jobId && !downloadUrl && (
+      {jobId && (
         <div className="topic-feedback wb-video-notice">
           <div role="status">
-            {api.mode === 'mock' ? <span>已生成模拟渲染任务。</span> : <span>渲染任务已提交至渲染机，约需 40-60 秒完成</span>}
+            <span>{api.mode === 'mock' ? '已生成模拟渲染任务。' : '视频任务已提交。'}</span>
             {' · 任务 ID '}<code>{jobId}</code>
+            {!downloadUrl && (
+              <div>{api.mode === 'mock' ? '模拟任务无可下载文件。' : '回执未提供有效的 HTTPS 下载链接，请核对 n8n 回执。'}</div>
+            )}
           </div>
+          {downloadUrl && (
+            <a className="button button--primary" href={downloadUrl} target="_blank" rel="noopener noreferrer">
+              <Download size={15} aria-hidden />下载成品 MP4
+            </a>
+          )}
         </div>
       )}
     </div>

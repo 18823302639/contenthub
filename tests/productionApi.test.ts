@@ -77,3 +77,39 @@ describe('Remotion 兼容性', () => {
       .toMatchObject({ error: null, missingSources: [] })
   })
 })
+
+it('挑刺回执返回本轮编辑稿，发送当前图文、口播与指令', async () => {
+  const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({
+    draft_md: '# 已优化图文', video_script: '优化口播',
+  }))
+  const api = createContentHubApi({ VITE_USE_MOCK: 'false' }, fetcher)
+  const payload = { production_id: 9, revision_note: '精简摘要', draft_md: '# 编辑中的稿', video_script: '编辑中的口播' }
+  await expect(api.triggerWebhook('rewrite-draft', payload)).resolves.toMatchObject({
+    draft_md: '# 已优化图文', video_script: '优化口播',
+  })
+  const [url, init] = fetcher.mock.calls[0]
+  expect(url).toBe('/api/n8n/rewrite-draft')
+  expect(JSON.parse(String(init?.body))).toEqual(payload)
+  expect(init?.headers).toEqual({ 'Content-Type': 'application/json' })
+})
+
+it('NocoDB 优先报告跨页全库总数并解码 WF4 字段，不改同源读取方式', async () => {
+  const fetcher = vi.fn<typeof fetch>()
+    .mockResolvedValueOnce(Response.json({
+      list: [{ id: 1, need_remotion: 'false', render_status: 'completed',
+        video_url: 'https://mock.example.invalid/v.mp4', cards_urls: '["/files/card.png"]',
+        updated_at: '2024-07-01T03:00:00Z' }],
+      pageInfo: { isLastPage: false, totalRows: '42' },
+    })).mockResolvedValueOnce(Response.json({
+      list: [{ id: 2, need_remotion: 'true', render_status: 'failed', render_error: '模拟失败' }],
+      pageInfo: { isLastPage: true },
+    }))
+
+  const api = createContentHubApi({ VITE_USE_MOCK: 'false', VITE_NOCODB_PRODUCTION_POOL_TABLE_ID: 'mtest' }, fetcher)
+  const total = vi.fn()
+  const items = await api.listProductionItems(undefined, total)
+  expect(total).toHaveBeenCalledExactlyOnceWith(42)
+  expect(items[0]).toMatchObject({ need_remotion: false, render_status: 'completed', cards_urls: ['/files/card.png'] })
+  expect(items[1]).toMatchObject({ need_remotion: true, render_error: '模拟失败' })
+  expect(fetcher.mock.calls[1][0]).toBe('/api/nocodb/tables/mtest/records?offset=1&limit=100&sort=id')
+})

@@ -1,18 +1,21 @@
 import { ChevronDown, Inbox, RefreshCw } from 'lucide-react'
-import { useEffect, useId, useState } from 'react'
+import { lazy, Suspense, useEffect, useId, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { matchesProductionFilters } from '../../api'
 import type { ContentHubApi } from '../../api'
 import type { RecordWrites } from '../../app/useRecordWrites'
 import { productionRiskLabels, productionTracks, workflowStatuses } from '../../types/schema'
-import { ProductionDesk } from '../productionDesk/ProductionDesk'
 import { RssSyncControls } from '../rssSync/RssSyncControls'
 import type { useRssSync } from '../rssSync/useRssSync'
 import { TopicCard, TopicFeedback } from './TopicCard'
 import { isActivityError, isGeneratingDraft, isMutationBlocked } from './useTopicBoard'
 import type { useTopicBoard } from './useTopicBoard'
 
+const ProductionDesk = lazy(() => import('../productionDesk/ProductionDesk')
+  .then(module => ({ default: module.ProductionDesk })))
+
+const pageSizes = ['12', '20', '50']
 const scores = ['1', '2', '3', '4', '5']
 const trackTabs = [
   ['', '全部'],
@@ -47,6 +50,12 @@ export function TopicsPage({ api, board, writes, rssSync }: {
   const { ensureLoaded, items, loading, loadError, activities, lastActivityId, refresh } = board
   const [query, setQuery] = useSearchParams()
   const [desk, setDesk] = useState<{ id: number; opener: HTMLButtonElement } | null>(null)
+  const keyword = query.get('q') ?? ''
+  const [searchInput, setSearchInput] = useState(keyword)
+  const [pageInput, setPageInput] = useState('')
+  const results = useRef<HTMLDivElement>(null)
+  const pageSize = Number(pageSizes.find(size => size === query.get('size')) ?? pageSizes[0])
+  useEffect(() => setSearchInput(keyword), [keyword])
 
   useEffect(() => ensureLoaded(), [ensureLoaded])
 
@@ -58,14 +67,21 @@ export function TopicsPage({ api, board, writes, rssSync }: {
   const statuses = new Set([...workflowStatuses, ...(items ?? []).map(item => item.workflow_status), status].filter(Boolean))
   const legacyTrackPresent = (items ?? []).some(item => !trackTabs.slice(1).some(([code]) => code === item.track_tag)) ||
     !trackTabs.some(([code]) => code === track)
-  const filtersActive = Boolean(track || minimum || status || risk)
+  const filtersActive = Boolean(track || minimum || status || risk || keyword)
   const visible = (items ?? []).map(item => isGeneratingDraft(activities[item.id])
     ? { ...item, workflow_status: '生成中' } : item).filter(item => matchesProductionFilters(item, {
     trackTag: track || undefined,
     minScore: minimum ? Number(minimum) : undefined,
     status: status || undefined,
     risk: risk || undefined,
-  }))
+  })).filter(item => !keyword.trim() || [item.zh_title, item.raw_title, item.key_data_points, item.source_name]
+    .some(field => field.toLocaleLowerCase().includes(keyword.trim().toLocaleLowerCase())))
+
+  const pages = Math.max(1, Math.ceil(visible.length / pageSize))
+  const requestedPage = Number(query.get('page'))
+  const page = Number.isSafeInteger(requestedPage) ? Math.max(1, Math.min(requestedPage, pages)) : 1
+  const pageItems = visible.slice((page - 1) * pageSize, page * pageSize)
+  useEffect(() => setPageInput(String(page)), [page])
 
   const visibleIds = new Set(visible.map(item => item.id))
   const hiddenActivities = Object.entries(activities).filter(([id, activity]) => (
@@ -79,11 +95,14 @@ export function TopicsPage({ api, board, writes, rssSync }: {
     const next = new URLSearchParams(query)
     if (value) next.set(key, value)
     else next.delete(key)
+    if (key !== 'page') next.delete('page')
     setQuery(next, { replace: true })
+    results.current?.scrollIntoView?.({ block: 'start' })
   }
 
   function clear() {
     setQuery({}, { replace: true })
+    results.current?.scrollIntoView?.({ block: 'start' })
   }
 
   return (
@@ -99,6 +118,10 @@ export function TopicsPage({ api, board, writes, rssSync }: {
       </header>
 
       <RssSyncControls model={rssSync} />
+      <div className="topic-totals" aria-live="polite">
+        {board.totalRows !== null && <p>当前总选题数：{board.totalRows} 条</p>}
+        {rssSync.result && <p className="topic-feedback" role="status">{rssSync.result}</p>}
+      </div>
       <div className="production-track-tabs" role="group" aria-label="按赛道分池">
         {trackTabs.map(([code, name]) => (
           <button key={code} type="button" className="button button--secondary" aria-pressed={track === code}
@@ -106,6 +129,14 @@ export function TopicsPage({ api, board, writes, rssSync }: {
         ))}
       </div>
       <div className="filters" aria-label="筛选选题" role="group">
+        <form className="topic-search" onSubmit={event => { event.preventDefault(); select('q', searchInput.trim()) }}>
+          <label htmlFor="topic-keyword">标题/关键词</label>
+          <div>
+            <input id="topic-keyword" type="search" value={searchInput}
+              onChange={event => { setSearchInput(event.target.value); if (!event.target.value && keyword) select('q', '') }} />
+            <button className="button button--secondary" type="submit">搜索</button>
+          </div>
+        </form>
         {legacyTrackPresent && (
           <FilterField label="赛道" value={track} onChange={value => select('track', value)}>
             <option value="">全部赛道</option>
@@ -137,7 +168,7 @@ export function TopicsPage({ api, board, writes, rssSync }: {
         </div>
       )}
 
-      <div aria-busy={loading}>
+      <div ref={results} className="topic-results" aria-busy={loading}>
         {items === null && loading && (
           <div className="loading-state" role="status">
             <p>正在加载选题…</p>
@@ -153,7 +184,7 @@ export function TopicsPage({ api, board, writes, rssSync }: {
             </p>
             {visible.length > 0 ? (
               <div className="topic-grid">
-                {visible.map(item => (
+                {pageItems.map(item => (
                   <TopicCard key={item.id} item={item} activity={activities[item.id]} writeBusy={board.lockedIds.has(item.id)}
                     onConfirm={board.confirm} onGenerate={board.generateDraft} onAbandon={board.abandon}
                     onOpen={(id, opener) => setDesk({ id, opener })} />
@@ -166,11 +197,35 @@ export function TopicsPage({ api, board, writes, rssSync }: {
                 {filtersActive && <button className="button button--secondary" onClick={clear}>清除筛选</button>}
               </div>
             )}
+            {visible.length > 0 && (
+              <nav className="topic-pagination" aria-label="选题分页">
+                <span>共 {visible.length} 条，第 {page} / {pages} 页</span>
+                <button type="button" className="button button--secondary" disabled={page === 1}
+                  onClick={() => select('page', String(page - 1))}>上一页</button>
+                <button type="button" className="button button--secondary" disabled={page === pages}
+                  onClick={() => select('page', String(page + 1))}>下一页</button>
+                <form onSubmit={event => {
+                  event.preventDefault()
+                  const target = Number(pageInput)
+                  if (Number.isSafeInteger(target) && target >= 1 && target <= pages) select('page', String(target))
+                }}>
+                  <label htmlFor="topic-page-number">页码</label>
+                  <input id="topic-page-number" type="number" min={1} max={pages} value={pageInput}
+                    onChange={event => setPageInput(event.target.value)} required />
+                  <button type="submit" className="button button--secondary">跳转</button>
+                </form>
+                <FilterField label="每页条数" value={String(pageSize)} onChange={value => select('size', value)}>
+                  {pageSizes.map(size => <option key={size} value={size}>{size} 条/页</option>)}
+                </FilterField>
+              </nav>
+            )}
           </>
         )}
       </div>
-      {desk && <ProductionDesk key={desk.id} api={api} id={desk.id} writes={writes} opener={desk.opener}
-        onSaved={board.observeWorkbenchWrite} onClose={() => setDesk(null)} />}
+      {desk && <Suspense fallback={<p role="status">正在载入精修工作台…</p>}>
+        <ProductionDesk key={desk.id} api={api} id={desk.id} writes={writes} opener={desk.opener}
+          onSaved={board.observeWorkbenchWrite} onClose={() => setDesk(null)} />
+      </Suspense>}
     </section>
   )
 }

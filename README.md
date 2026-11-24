@@ -11,8 +11,8 @@ Dockerfile 使用 Node 构建 Vite 产物，最终镜像由 Nginx 提供 `dist` 
 启动 Docker Desktop，使用 Linux 容器。在下载 ZIP 的目录打开 PowerShell，执行：
 
 ```powershell
-Expand-Archive -LiteralPath .\ContentHub-caddy-security.zip -DestinationPath .\contenthub-caddy-security
-Set-Location .\contenthub-caddy-security\ContentHub
+Expand-Archive -LiteralPath .\ContentHub-workspace-upgrade.zip -DestinationPath .\contenthub-workspace-upgrade
+Set-Location .\contenthub-workspace-upgrade\ContentHub
 docker build -t contenthub:mock .
 docker run --rm -d --name contenthub -p 127.0.0.1:8088:80 contenthub:mock
 Start-Process 'http://127.0.0.1:8088/'
@@ -23,8 +23,8 @@ Start-Process 'http://127.0.0.1:8088/'
 Docker Engine 启动后，在下载 ZIP 的目录执行：
 
 ```bash
-unzip ContentHub-caddy-security.zip -d contenthub-caddy-security
-cd contenthub-caddy-security/ContentHub
+unzip ContentHub-workspace-upgrade.zip -d contenthub-workspace-upgrade
+cd contenthub-workspace-upgrade/ContentHub
 docker build -t contenthub:mock .
 docker run --rm -d --name contenthub -p 127.0.0.1:8088:80 contenthub:mock
 ```
@@ -52,7 +52,7 @@ Vite 构建时按完整变量名选取公开的 `VITE_*` 配置并写入浏览�
 要求 Node.js 22.13+（22 系列）或 24+，以及 npm。源码包包含锁文件。
 
 ```bash
-unzip ContentHub-caddy-security.zip
+unzip ContentHub-workspace-upgrade.zip
 cd ContentHub
 cp .env.example .env.local
 npm ci --no-audit --no-fund
@@ -86,19 +86,19 @@ npm run preview -- --host 127.0.0.1
 - 通过「全部」「主赛道」「副赛道」分池，可同时使用流程状态、合规风险和评分筛选。旧赛道保留原确认和改稿流程。顶部采集控件和筛选共用同一份现有列表状态。
 - 新赛道的「生成初稿」调用 WF2。已有初稿时点击「重新生成」需确认。受理后每 5 秒读取该记录，最多等待 180 秒，回写到「待人工审核」后更新列表。旧审核状态不会单独触发重生成成功提示。
 - 「打开工作台」从 NocoDB 读取完整记录。顶部展示合规命中和修改建议，可切换正文、主赛道口播／Remotion JSON 和原始信源。关闭有未保存内容的工作台会提示确认。
-- NocoDB PATCH 使用 JSON 对象写入 `remotion_data`。无法解析的 JSON 会阻止保存。非空的 `scenes`、`cards` 条目缺少 `source` 时会定位提示并阻止渲染。人工定稿在一次更新中写入 `draft_md`、`final_md`、`final_content` 和「已定稿」，只有主动勾选才将风险降为「低风险」。
-- WF3 只面向主赛道。应先保存修改后的渲染数据，提交前前端会重新读取 NocoDB 记录核对风险和渲染数据。成功提示表示 Webhook 已受理，渲染完成由后端确认。
+- NocoDB PATCH 使用 JSON 对象写入 `remotion_data`。无法解析的 JSON 会阻止保存。启用 Remotion 的选题需至少有一项 `scenes` 或 `cards`。每项提供非空 `source` 及年份，支持在来源文本中写明年份，或填写 `source_year`、`year`。缺项会阻止定稿与渲染。人工定稿在一次更新中写入 `draft_md`、`final_md`、`final_content` 和「已定稿」，只有主动勾选才将风险降为「低风险」。
+- Remotion 面向主赛道及明确启用视频的适用记录。副赛道和 `need_remotion=false` 不提供提交入口。WF4 受理后每 10 秒读取本条 NocoDB 记录直至完成或失败，也可手动刷新。完成且有可用地址后，可预览、下载及复制视频链接。跨域对象是否直接保存由响应的 `Content-Disposition` 控制。
 
 ## 改稿台用法
 
-- 在看板选择「进入改稿台」，也可直接打开 `#/workbench/3` 查看 Mock 初稿，或打开 `#/workbench/4` 查看已有定稿。左栏可切换原文素材与 AI 事实核查清单。窄屏使用工具栏的「跳到稿件」直达当前稿件视图。
+- 侧栏「改稿台」主动读取待改稿队列，按更新时间倒序。打开 `#/workbench?id=3` 可指定稿件，省略 ID 时优先恢复本浏览器上次稿件。桌面可折叠列表，超过八篇可搜索。手机使用顶部选择器。在看板选择「进入改稿台」，也可直接打开 `#/workbench/3` 查看 Mock 初稿，或打开 `#/workbench/4` 查看已有定稿。左栏可切换原文素材与 AI 事实核查清单。窄屏使用工具栏的「跳到稿件」直达当前稿件视图。
 - 「AI 大纲」标签页以 Markdown 展示 `production_pool.ai_outline`。工具栏的「标杆样本」开关只写入 `is_benchmark`，回读确认后更新改稿台和看板徽章。
 - 初次打开稿件时优先显示 `final_md`，定稿为空时使用 `draft_md`。空稿可直接输入。预览支持 GFM 表格和任务清单，跳过原始 HTML，远程图片显示替代文字。「复制全文」将当前编辑稿的安全 HTML 与 Markdown 写入剪贴板。浏览器拒绝富文本时会尝试复制 Markdown，也可直接点击「复制 Markdown」。
-- 「保存定稿」只写入 `final_md`。保存提交后仍可继续输入，回读保留随后输入的内容。「标记为已发布」针对已经保存的定稿，仅更新 `workflow_status` 和 `published_at`。看板与改稿台按选题共用写入锁。
-- 点击「AI 去味改稿」前，可留空、手填或选择快捷模板后编辑。留空会发送 `revision_note: ''`。界面先保存修改意见和「需AI润色」，确认回读后发出一次 `rewrite-draft`。真实模式受理后每 4 秒查询，最多等待 90 秒。手动刷新只读查询，同一任务沿用原轮询期限。
+- 「保存草稿」写入当前正文及适用的视频字段。「人工复核通过并定稿」同步更新定稿字段和状态。出现高危词、高风险、无效 Remotion JSON 或缺少来源年份时，页面给出具体阻止原因。离页、切稿或关闭有未保存编辑的抽屉会提示确认。兼容入口「保存定稿」只写入 `final_md`。保存提交后仍可继续输入，回读保留随后输入的内容。「标记为已发布」针对已经保存的定稿，仅更新 `workflow_status` 和 `published_at`。看板与改稿台按选题共用写入锁。
+- 「AI 挑刺去味」把当前编辑内容和可选侧重点交给 WF3，回执只填回编辑框，检查后由人工保存或定稿。兼容流程「AI 去味改稿」可继续等待旧工作流的 NocoDB 回写。点击「AI 去味改稿」前，可留空、手填或选择快捷模板后编辑。留空会发送 `revision_note: ''`。界面先保存修改意见和「需AI润色」，确认回读后发出一次 `rewrite-draft`。真实模式受理后每 4 秒查询，最多等待 90 秒。手动刷新只读查询，同一任务沿用原轮询期限。
 - 读到新增或变化的非空 `draft_md` 时，编辑区立即显示它。若流程状态先更新，则继续等待正文回写。等待期间的人工稿件可在「本地备份」恢复，离开再返回改稿台时，本次应用会话会保留新初稿和备份。需要长期保留时，请保存定稿。仅更新定稿字段的工作流仍提供「回写稿」对照。
 - 读写失败或 Webhook 受理结果不明时，可刷新记录核对。刷新只读取记录。若记录仍显示「需AI润色」且没有可见结果，核对对应 n8n 执行记录。离开该选题或重载页面前，请保存需要保留的本地编辑。
-- 「生成视频」默认选 16x9 和云希，可切换为 9x16 或选择云健、晓晓、晓伊。工作流按选题 ID 读取已存内容，需要带上刚编辑的正文时请先保存定稿。回执中的任务 ID 表示渲染任务已提交。收到有效签名链接后，改稿台每 6 秒探测一次视频，确认可下载后解锁「下载成品 MP4」。180 秒未确认时也会解锁，可稍后手动尝试。Mock 仅演示任务回执。
+- 「生成视频」默认选 16x9 和云希，可切换为 9x16 或选择云健、晓晓、晓伊。工作流按选题 ID 读取已存内容，需要带上刚编辑的正文时请先保存定稿。回执中的任务 ID 表示渲染任务已提交。收到有效 HTTPS 签名链接后立即提供「下载成品 MP4」，只在点击时打开原链接。Mock 仅演示任务回执。
 
 ## RSS 信源管理
 
@@ -232,7 +232,7 @@ ContentHub/
 - 单条读取使用 `GET /tables/{tableId}/records/{id}`。`POST` 新增和 `PATCH` 更新都发送一项记录数组到记录集合。PATCH 包含主键，写入成功后按回执主键回读。NocoDB 主键显示名默认 `id`，可将 `VITE_NOCODB_ID_FIELD` 设为实际显示名，例如 `Id`。前端模型统一使用数值型 `id`。 [NocoDB v2 数据 API](https://nocodb.com/apis/v2/data)
 - 读取时，未知选项保留原文本并在控制台提示。标题接受数组、JSON 数组或单条文本。缺失文本和日期为空字符串，`ai_outline` 缺失时为 `null`，无效数值按缺失处理。布尔值兼容 `true`、`false`、`1`、`0` 及其字符串。列表内无有效主键的记录会跳过，分页仍按原始条数前进。
 - `post_metrics` 只读接口按同名字段兼容 `production_id`、`platform`、展现、阅读、CTR、完读率、收益和记录日期。项目没有这张表的专属列定义，同名字段以外的列需要确认实际映射后才可使用。运营页继续查询 `account_metrics`。
-- n8n 的采集和旧流程默认向同源 `/api/n8n/${action}` POST JSON，可通过 `VITE_N8N_WEBHOOK_BASE_URL` 覆盖基础路径。初稿和改稿的 2xx 回执表示请求受理，完成结果通过 NocoDB 回读。视频工作流在 2xx JSON 回执中返回 `{ jobId, downloadUrl }`。`jobId` 为非空字符串，`downloadUrl` 由后端签发，单视频有效期 24 小时。缺少合法 HTTP(S) 下载链接时，改稿台仍显示有效任务 ID。 [n8n Webhook](https://docs.n8n.io/integrations/builtin/core-nodes/n8n-nodes-base.webhook/)
+- n8n 的采集和旧流程默认向同源 `/api/n8n/${action}` POST JSON，可通过 `VITE_N8N_WEBHOOK_BASE_URL` 覆盖基础路径。初稿和改稿的 2xx 回执表示请求受理，完成结果通过 NocoDB 回读。改稿台的 `generate-video` 在 2xx JSON 回执中返回 `{ jobId, downloadUrl }`。`jobId` 为非空字符串，`downloadUrl` 由后端签发，单视频有效期 24 小时。缺少合法 HTTPS 下载链接时，改稿台显示有效任务 ID 并提示核对回执。 [n8n Webhook](https://docs.n8n.io/integrations/builtin/core-nodes/n8n-nodes-base.webhook/)
 
 真实部署待实测项目包括 PostgreSQL 外部表在 NocoDB 中暴露的字段名和类型、主键和创建时间默认值、标题 JSON 与日期的实际序列化、单条写入回执及分页上限，以及已激活的 n8n 工作流对 payload 的解析、鉴权和写回状态。接口测试使用合成响应，未连接真实 NocoDB、n8n 和渲染机。
 
@@ -242,11 +242,14 @@ ContentHub/
 | --- | --- | --- |
 | 手动采集 WF1 | `/api/n8n/rss-sync-now` | `VITE_N8N_WEBHOOK_BASE_URL`（基础路径） |
 | 初稿生成 WF2 | `/api/n8n/generate-draft` | `VITE_WF2_GENERATE_WEBHOOK_URL` |
-| 提交渲染 WF3 | `/api/n8n/render-video` | `VITE_WF3_RENDER_WEBHOOK_URL` |
+| 改稿台生成视频 | `/api/n8n/generate-video` | `VITE_N8N_WEBHOOK_BASE_URL`（基础路径） |
+| Remotion 提交渲染 WF4 | `/api/n8n/render-video` | `VITE_WF3_RENDER_WEBHOOK_URL` |
 
-WF2 和 WF3 发送 `POST` JSON `{ "record_id": 记录主键 }`。现有 Caddy 站点认证须覆盖网页和 `/api/*`。Caddy 将 `/api/n8n/<action>` 转发到 n8n 的 `/webhook/<action>`，上游要求 Webhook 密钥时，由 Caddy 设置 `X-Hub-Token` 并覆盖客户端同名头。若继续使用旧改稿和视频入口，代理还需映射相应的 `fetch-and-draft`、`rewrite-draft` 和 `generate-video`。仓库中的 Nginx 负责静态文件，Caddy 处理 API 后将其余请求转发到静态站点。默认 WF3 路由返回 HTTP 404 时，界面提示渲染服务尚未接入。
+生成初稿及 Remotion 提交都发送 `POST` JSON `{ "record_id": 记录主键 }`。现有 Caddy 站点认证须覆盖网页和 `/api/*`。Caddy 将 `/api/n8n/<action>` 转发到 n8n 的 `/webhook/<action>`，上游要求 Webhook 密钥时，由 Caddy 设置 `X-Hub-Token` 并覆盖客户端同名头。启用改稿台视频功能时，部署端需确认 Caddy 允许 `POST /api/n8n/generate-video` 并映射到 n8n 的 `/webhook/generate-video`。生产台的 `render-video` 使用独立路由。旧初稿和改稿入口仍需各自的 `fetch-and-draft` 和 `rewrite-draft` 映射。仓库中的 Nginx 负责静态文件，Caddy 处理 API 后将其余请求转发到静态站点。默认 Remotion 路由返回 HTTP 404 时，界面提示渲染服务尚未接入。
 
 ### RSS 采集接口
+
+看板显示 `pageInfo.totalRows`。采集后刷新将比较全库数量，若确认新的批次返回了 `last_sync_added_count`，以该值为准。看板通过 NocoDB `limit/offset` 读全页，保留前端兼容筛选后按 12、20 或 50 条展示。搜索中文标题、原题、摘要或信源。
 
 采集配置使用 NocoDB 的 `sync_settings` 表中的单条记录。需填写实际 Table ID 和现有记录主键。前端通过同源 NocoDB 代理读取与更新该行，切换频率只写数值字段 `sync_interval_hours`，允许值为 0、1、3、6、12、24。后端调度读取该字段，手动采集向同源代理发送空 JSON 对象。代理返回 HTTP 401/403 时，页面会提示采集鉴权失败。工作流采集完成后在同一行写入带时区的 `last_synced_at`。Mock 只模拟配置和完成时间，真实接口需联调验证。
 
@@ -262,12 +265,18 @@ WF2 和 WF3 发送 `POST` JSON `{ "record_id": 记录主键 }`。现有 Caddy �
 
 状态写入和 Webhook 受理是两次独立请求。先确认写入结果，再触发对应 Webhook。写入已返回成功但回执或回读异常时，API 抛出 `WriteReadbackError`，优先按可用主键查询记录。Webhook 超时、断网或响应有歧义时，先查记录和 n8n 执行历史，确认未启动后再触发。真实工作流若需要允许安全重试，应先约定执行标识与去重规则。 [n8n Webhook 响应模式](https://docs.n8n.io/integrations/builtin/core-nodes/n8n-nodes-base.webhook/#respond)
 
+### WF3 挑刺改稿和 WF4 渲染回写
+
+- 新入口 `POST /api/n8n/rewrite-draft` 发送 `{ production_id, revision_note, draft_md, video_script }`。返回 JSON 可为 `{ draft_md, video_script }` 或一项此对象的数组，至少提供一项非空文稿。该入口以回传编辑稿为契约。只返回受理消息时，保留当前编辑并提示核对回执。此前只发送 ID 和修改意见的工作流继续走等待回写路径。
+- `POST /api/n8n/render-video` 发送 `{ record_id }`。现有 `VITE_WF3_RENDER_WEBHOOK_URL` 是该端点的历史覆盖变量名。WF4 写入 `production_pool.render_status`（`queued`、`rendering`、`completed` 或 `failed`）、`video_url`、可选 `cards_urls` 数组以及 `render_error`。推荐受理后先写排队状态并清理旧结果，新的任务结果应具有可区分的链接或错误。成片地址支持 HTTPS 或站内根路径。
+- 队列从 `production_pool.updated_at` 排序，也兼容 `UpdatedAt`，旧记录用 `created_at`。视频是否适用读取 `track_tag` 和可选 `need_remotion`。
+
 ### 联调权限边界
 
 NocoDB 和 n8n 的认证凭据保存在部署端。浏览器只调用同源代理路径；需要覆盖时仍应指定以 `/` 开头的路径。HTTP 401/403 仍会显示鉴权失败信息。
 
 Caddy 在站点认证通过后把 `/api/nocodb/` 映射到 NocoDB 的 `/api/v2/`，保留后续路径和查询参数，并在上游请求中设置 `xc-token`，覆盖客户端同名头。如果站点用 Caddy Basic Auth 登录，通过认证后可用 `header_up -Authorization` 避免将站点登录凭据转发给业务上游。代理仅放行所需表、方法和 Webhook 路径，服务器密钥文件保留在 Docker 构建上下文之外。 [Caddy 反向代理文档](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy)
 
-视频下载使用后端返回的签名地址，前端直接在新标签页打开并保留查询串原文。渲染服务地址和签名凭据由后端管理。HTTPS 部署请签发 HTTPS 下载链接。浏览器通过 `GET` 和 `Range: bytes=0-0` 检查 R2，跨域时需要存储桶的 CORS 策略允许 ContentHub 的来源和 `GET`。 [Cloudflare R2 CORS 配置](https://developers.cloudflare.com/r2/buckets/cors/#use-cors-with-a-presigned-url) [W3C 混合内容规范](https://www.w3.org/TR/mixed-content/#modifications-to-html)
+改稿台收到有效的 HTTPS 签名地址后立即显示「下载成品 MP4」。点击时在新标签页打开原地址，签名查询串原样保留。前端在用户点击前不会探测文件，也不会记录或持久化签名链接。渲染服务地址和签名凭据由后端管理，链接有效期为 24 小时。
 
 阶段 6 完成 ContentHub 的离线 Mock 源码交付。

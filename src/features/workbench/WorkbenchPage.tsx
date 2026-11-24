@@ -1,21 +1,27 @@
 import { ArrowDown, ArrowLeft, ArrowUpRight, Bookmark, Clipboard, LoaderCircle, RefreshCw, Save, Sparkles } from 'lucide-react'
-import { useId, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import type { RefObject } from 'react'
-import { Link, useLocation, useParams } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import type { To } from 'react-router-dom'
 import type { RecordWrites } from '../../app/useRecordWrites'
 import type { ContentHubApi } from '../../api'
 import { aiProcessingLabel } from '../../api/workflowPolling'
-import { isWorkflowStatus } from '../../types/schema'
+import { isWorkflowStatus, productionRiskLabel } from '../../types/schema'
 import type { ProductionItem } from '../../types/schema'
 import { externalUrl } from '../../utils/externalUrl'
 import { MarkdownPreview } from './MarkdownPreview'
+import { useUnsavedChanges } from '../../app/UnsavedChanges'
+import { lastWorkbenchId, rememberWorkbench, WorkbenchQueue, workbenchQueue } from './WorkbenchQueue'
+import { needsRemotion, editorialWarnings, renderDataIssue, renderRecordIsCurrent, reviewIssue } from '../productionDesk/editingRules'
+import { parseRemotion, remotionText } from '../productionDesk/remotion'
+import { RenderResults, useRenderResults } from '../productionDesk/RenderResults'
 import { VideoControls } from './VideoControls'
 import { useWorkbench } from './useWorkbench'
 import type { WorkbenchSession } from './useWorkbench'
 import './workbench.css'
 
 interface WorkbenchProps {
+  queue: { items: ProductionItem[] | null; loading: boolean; loadError: string | null; refresh: () => Promise<void> }
   api: ContentHubApi
   writes: RecordWrites
   sessions: Map<number, WorkbenchSession>
@@ -171,13 +177,58 @@ function Workbench({ api, id, writes, sessions, onWrite, refreshBoard, topicsPat
   const workbench = useWorkbench(api, id, writes, onWrite, refreshBoard, sessions)
   const { doc, operation, notice, copyNotice, watching } = workbench
   const record = doc?.record
+  const [reviewTicket, setReviewTicket] = useState<string | null>(null)
+  const [polishNote, setPolishNote] = useState('')
+  const [reviewedFields, setReviewedFields] = useState<string | null>(null)
+  const [renderingRequest, setRenderingRequest] = useState(false)
+  const [renderNotice, setRenderNotice] = useState<{ text: string; error?: boolean } | null>(null)
+  const video = Boolean(record && needsRemotion(record))
+  const render = useRenderResults(api, record, video)
+  const parsed = parseRemotion(video ? workbench.remotion : '')
+  const warnings = editorialWarnings({ title: record?.zh_title ?? '', article: doc?.markdown ?? '', script: workbench.script })
+  const reviewKey = JSON.stringify([record?.zh_title, doc?.markdown, workbench.script, workbench.remotion])
+  const markLow = reviewTicket === reviewKey
+  const reviewReason = record ? reviewIssue(record, warnings, markLow || reviewedFields === reviewKey) : null
+  const dataReason = video ? renderDataIssue(parsed) : null
+  const finalizeReason = reviewReason || dataReason || (!record?.zh_title.trim() ? '请先补齐中文标题。' : null)
+  const renderReason = reviewReason || dataReason ||
+    (productionRiskLabel(record?.compliance_risk ?? '') === '高风险' ? '请先用人工复核操作保存低风险等级。' : null) ||
+    (workbench.dirty ? '请先保存草稿和渲染数据。' : null) ||
+    (render.phase === 'rendering' ? '已在渲染，请等待本次结果。' : null)
+  useUnsavedChanges(workbench.dirty || markLow)
+  useEffect(() => { if (record) rememberWorkbench(record.id) }, [record])
   const noteId = useId()
+  const jsonId = noteId + '-remotion'
+  const finalizeReasonId = noteId + '-finalize-reason'
+  const renderReasonId = noteId + '-render-reason'
   const draftPanel = useRef<HTMLElement>(null)
   const sendingRewrite = operation === 'rewriting'
   const rewritingLabel = watching ? aiProcessingLabel : sendingRewrite ? '正在提交改稿…' : 'AI 去味改稿'
 
+  async function submitRender() {
+    if (!record || !video || renderReason || renderingRequest || operation !== null) return
+    const release = writes.acquire(id)
+    if (!release) return
+    setRenderingRequest(true)
+    setRenderNotice(null)
+    try {
+      const latest = await api.getProductionItem(id)
+      if (!renderRecordIsCurrent(record, latest, parsed)) {
+        throw new Error('记录已变更或不满足渲染条件，请刷新记录核对。')
+      }
+      await api.triggerRender(id)
+      render.accepted(latest)
+      setRenderNotice({ text: 'Remotion 渲染请求已受理' })
+    } catch (error) {
+      setRenderNotice({ text: error instanceof Error ? error.message : '渲染请求未确认。', error: true })
+    } finally {
+      setRenderingRequest(false)
+      release()
+    }
+  }
+
   return (
-    <section aria-labelledby="workbench-heading">
+    <section className="wb-workspace-editor" aria-labelledby="workbench-heading">
       <header className="page-header wb-page-header">
         <div>
           <h1 id="workbench-heading">改稿台</h1>
@@ -223,9 +274,6 @@ function Workbench({ api, id, writes, sessions, onWrite, refreshBoard, topicsPat
                 {watching || sendingRewrite ? <LoaderCircle size={15} className="refresh-spinning" aria-hidden />
                   : <Sparkles size={15} aria-hidden />}{rewritingLabel}
               </button>
-              <button className="button button--secondary" disabled={!workbench.canSave} onClick={() => void workbench.save()}>
-                <Save size={15} aria-hidden />保存定稿
-              </button>
               <button className="button button--secondary" disabled={!doc.markdown.trim()} onClick={() => void workbench.copy('rich')}>
                 <Clipboard size={15} aria-hidden />复制全文
               </button>
@@ -247,17 +295,67 @@ function Workbench({ api, id, writes, sessions, onWrite, refreshBoard, topicsPat
               {record.workflow_status === '已发布' && record.published_at &&
                 <time dateTime={record.published_at}>{record.published_at}</time>}
               {workbench.pending && !notice && <span>等待回写，可刷新记录查询进度。</span>}
-              {!workbench.pending && workbench.dirty && <span>保存编辑后可提交 AI 改稿或登记发布。</span>}
+              {!workbench.pending && workbench.dirty && <span>稿件尚有未保存的编辑。</span>}
               <button type="button" className="button button--quiet wb-jump-to-draft" onClick={() => draftPanel.current?.focus()}>
                 <ArrowDown size={15} aria-hidden />跳到稿件
               </button>
             </div>
-            <VideoControls api={api} productionId={id} />
+            {record.need_remotion !== false && record.track_tag !== 'sub_toutiao' && <VideoControls api={api} productionId={id} />}
           </div>
           <div className="wb-grid">
             <Sources record={record} />
             <EditorPanel workbench={workbench} panel={draftPanel} />
           </div>
+          {warnings.length > 0 && <p className="topic-feedback topic-feedback--warning" role="status">
+            高危词待核对 · {warnings.join('；')}
+          </p>}
+          {video && <div className="wb-remotion">
+            <details>
+              <summary>视频口播与 Remotion 渲染数据</summary>
+              <label htmlFor={jsonId + '-script'}>视频口播稿</label>
+              <textarea id={jsonId + '-script'} value={workbench.script} disabled={operation === 'polishing'}
+                onChange={event => workbench.editScript(event.target.value)} />
+              <label htmlFor={jsonId}>Remotion JSON</label>
+              <button type="button" className="button button--secondary" disabled={!parsed.value}
+                onClick={() => workbench.editRemotion(JSON.stringify(parsed.value, null, 2))}>格式化 JSON</button>
+              <textarea className="desk-json" spellCheck={false} id={jsonId} value={workbench.remotion}
+                aria-invalid={Boolean(dataReason)} aria-describedby={dataReason ? jsonId + '-error' : undefined}
+                onChange={event => workbench.editRemotion(event.target.value)} />
+              {dataReason && <p id={jsonId + '-error'} className="topic-feedback topic-feedback--warning">{dataReason}</p>}
+            </details>
+            <RenderResults model={render} />
+          </div>}
+          <footer className="wb-action-footer">
+            {renderNotice && <p role={renderNotice.error ? 'alert' : 'status'}>{renderNotice.text}</p>}
+            {finalizeReason && <small id={finalizeReasonId}>{finalizeReason}</small>}
+            {video && renderReason && renderReason !== finalizeReason && <small id={renderReasonId}>{renderReason}</small>}
+            <div className="wb-footer-ai">
+              <label htmlFor={noteId + '-polish'}>修改侧重点（可选）</label>
+              <input id={noteId + '-polish'} value={polishNote} disabled={operation === 'polishing'}
+                onChange={event => setPolishNote(event.target.value)} placeholder="例如强化开头的数据对比" />
+              <button type="button" className="button button--secondary" disabled={!workbench.canPolish}
+                aria-busy={operation === 'polishing'} onClick={() => void workbench.polish(polishNote)}>
+                <Sparkles size={15} aria-hidden />{operation === 'polishing' ? 'AI 改稿中…' : 'AI 挑刺去味'}
+              </button>
+            </div>
+            <div className="wb-footer-actions">
+              <label><input type="checkbox" checked={markLow} onChange={event => setReviewTicket(event.target.checked ? reviewKey : null)} /> 人工复核后将风险改为低风险</label>
+              {(workbench.dirty || markLow) && <span className="wb-dirty">未保存</span>}
+              <button type="button" className="button button--secondary" disabled={!workbench.canSaveDraft || (video && Boolean(parsed.error))}
+                onClick={() => void workbench.saveDraft()}><Save size={15} aria-hidden />保存草稿</button>
+              <button type="button" className="button button--primary" disabled={!workbench.canSaveDraft || Boolean(finalizeReason)}
+                aria-describedby={finalizeReason ? finalizeReasonId : undefined}
+                onClick={() => void workbench.saveDraft(true, markLow, saved => {
+                  if (markLow) setReviewedFields(JSON.stringify([saved.zh_title, saved.draft_md, saved.video_script ?? '', remotionText(saved.remotion_data)]))
+                  setReviewTicket(null)
+                })}>人工复核通过并定稿</button>
+              {video && <button type="button" className="button button--secondary" disabled={Boolean(renderReason) || renderingRequest || operation !== null || writes.lockedIds.has(id)}
+                aria-describedby={renderReason ? (renderReason === finalizeReason ? finalizeReasonId : renderReasonId) : undefined}
+                onClick={() => void submitRender()}>{renderingRequest ? '正在提交…' : '提交 Remotion 渲染'}</button>}
+              <button type="button" className="button button--quiet" disabled={!workbench.canSave || Boolean(finalizeReason) || markLow}
+                onClick={() => void workbench.save()}>保存定稿</button>
+            </div>
+          </footer>
         </>
       )}
     </section>
@@ -266,10 +364,22 @@ function Workbench({ api, id, writes, sessions, onWrite, refreshBoard, topicsPat
 
 export function WorkbenchPage(props: WorkbenchProps) {
   const { id } = useParams()
-  const { state } = useLocation()
+  const { state, search } = useLocation()
+  const navigate = useNavigate()
+  const { queue } = props
+  const { refresh } = queue
+  const [defaultId, setDefaultId] = useState(lastWorkbenchId)
   const topicsPath = { pathname: '/topics', search: typeof state?.topicsSearch === 'string' ? state.topicsSearch : '' }
-  const recordId = Number(id)
-  if (!id || !/^[1-9]\d*$/.test(id) || !Number.isSafeInteger(recordId)) {
+  const rows = workbenchQueue(queue.items ?? [])
+  const requested = new URLSearchParams(search).get('id')
+  const routeId = id ? Number(id) : undefined
+  const queryId = requested && /^[1-9]\d*$/.test(requested) ? Number(requested) : undefined
+  const selected = queryId !== undefined && rows.some(item => item.id === queryId) ? queryId :
+    routeId ?? (rows.some(item => item.id === defaultId) ? defaultId : rows[0]?.id)
+  useEffect(() => { void refresh() }, [refresh])
+  useEffect(() => { if (selected !== undefined) setDefaultId(selected) }, [selected])
+
+  if (id && (!/^[1-9]\d*$/.test(id) || !Number.isSafeInteger(routeId))) {
     return (
       <section className="placeholder" aria-labelledby="invalid-workbench-heading">
         <h1 id="invalid-workbench-heading">改稿台</h1>
@@ -279,5 +389,21 @@ export function WorkbenchPage(props: WorkbenchProps) {
     )
   }
 
-  return <Workbench key={recordId} {...props} id={recordId} topicsPath={topicsPath} />
+  return <div className="wb-workspace">
+    <WorkbenchQueue items={rows} id={selected} loading={queue.loading} error={queue.loadError}
+      refresh={() => void refresh()} navigate={target => void navigate(target, { state })} state={state} />
+    {selected !== undefined
+      ? <Workbench key={selected} {...props} id={selected} topicsPath={topicsPath} />
+      : <section className="placeholder" aria-labelledby="empty-workbench-heading">
+        <h1 id="empty-workbench-heading">改稿台</h1>
+        {queue.items === null && queue.loading ? <p role="status">正在查找待改稿件…</p>
+          : queue.items === null && queue.loadError ? <>
+            <p role="alert">无法读取改稿队列。</p>
+            <button type="button" className="button button--secondary" onClick={() => void refresh()}>重新读取</button>
+          </> : <>
+            <p>暂无待改稿件。你可以从选题看板生成初稿。</p>
+            <Link className="button button--secondary" to={topicsPath}>返回选题看板</Link>
+          </>}
+      </section>}
+  </div>
 }

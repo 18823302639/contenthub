@@ -19,6 +19,8 @@ export const workflowStatuses = [
   '已定稿',
   '已确认-待核对',
   'AI初稿完成',
+  '初稿已生成',
+  '精修中',
   '需AI润色',
   '待人工终审',
   '已发布',
@@ -43,6 +45,7 @@ export interface RssSyncSettings {
   id: number
   sync_interval_hours: RssSyncInterval | null
   last_synced_at: string | null
+  last_sync_added_count?: number | null
 }
 
 export interface RssSource {
@@ -92,6 +95,12 @@ export interface ProductionItem {
   compliance_report?: ComplianceReport | null
   fact_check_notes?: string
   revision_note?: string
+  updated_at?: string
+  need_remotion?: boolean | null
+  render_status?: string
+  video_url?: string
+  cards_urls?: string[]
+  render_error?: string
   /** 未发布时为空字符串。 */
   published_at: string
   created_at: string

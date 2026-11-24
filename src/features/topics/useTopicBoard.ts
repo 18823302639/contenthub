@@ -42,6 +42,8 @@ export interface TopicActivity {
 interface BoardState {
   items: ProductionItem[] | null
   loading: boolean
+  totalRows: number | null
+  listVersion: number
   loadError: string | null
   activities: Partial<Record<number, TopicActivity>>
   lastActivityId: number | null
@@ -122,7 +124,7 @@ function observeActivity(item: ProductionItem, activity?: TopicActivity): TopicA
 
 export function useTopicBoard(api: ContentHubApi, writes: RecordWrites) {
   const [state, setState] = useState<BoardState>({
-    items: null, loading: true, loadError: null, activities: {}, lastActivityId: null,
+    items: null, loading: true, totalRows: null, listVersion: 0, loadError: null, activities: {}, lastActivityId: null,
   })
   const loadedOnce = useRef(false)
   const mounted = useRef(true)
@@ -146,7 +148,8 @@ export function useTopicBoard(api: ContentHubApi, writes: RecordWrites) {
     latestList.current = ticket
     setState(current => ({ ...current, loading: true, loadError: null }))
     try {
-      const incoming = await api.listProductionItems()
+      let reportedTotal: number | undefined
+      const incoming = await api.listProductionItems(undefined, total => { reportedTotal = total })
       if (!mounted.current || latestList.current !== ticket) return
 
       const protectedIds = new Set(busy.current)
@@ -173,7 +176,7 @@ export function useTopicBoard(api: ContentHubApi, writes: RecordWrites) {
           return item
         })
         items.push(...prior.filter(item => protectedIds.has(item.id) && !incomingIds.has(item.id)))
-        return { ...current, items, activities, loading: false }
+        return { ...current, items, activities, totalRows: reportedTotal ?? incoming.length, listVersion: ticket, loading: false }
       })
     } catch (error) {
       if (mounted.current && latestList.current === ticket) {

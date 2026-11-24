@@ -11,7 +11,7 @@ const main: ProductionItem = {
   url: 'https://source.example.invalid/data', key_data_points: '100 条记录', suggested_titles: ['一个更好的标题'],
   score: 4, compliance_risk: '高风险', workflow_status: '待人工审核', ai_outline: '## 分析步骤',
   is_benchmark: false, created_at: '', published_at: '', raw_content: '原始明细', draft_md: '# 原稿',
-  video_script: '这里是口播', remotion_data: { scenes: [{ source: '样本来源' }] },
+  video_script: '这里是口播', remotion_data: { scenes: [{ source: '样本来源（2024）' }] },
   compliance_report: { status: 'fail', banned_word_hits: ['包赚'], prediction_phrase_hits: ['必涨'],
     missing_sources: [], suggestion: '删去结论并核对样本' },
 }
@@ -111,13 +111,13 @@ it('工作台读取详情，校验 JSON 和来源，再把草稿写入两个定�
   fireEvent.change(json, { target: { value: '{"cards":[{}]}' } })
   expect(modal.getByText(/cards\[0\]\.source/)).toBeTruthy()
   expect(modal.getByRole<HTMLButtonElement>('button', { name: '提交 Remotion 渲染' }).disabled).toBe(true)
-  fireEvent.change(json, { target: { value: '{"scenes":[{"source":"样本来源"}]}' } })
+  fireEvent.change(json, { target: { value: '{"scenes":[{"source":"样本来源（2024）"}]}' } })
   fireEvent.click(modal.getByRole('checkbox', { name: '人工复核后将风险改为低风险' }))
   fireEvent.click(modal.getByRole('button', { name: '人工复核通过并定稿' }))
   await modal.findByText('已保存并定稿')
   expect(write).toHaveBeenCalledExactlyOnceWith(1, {
     zh_title: '一个更好的标题', draft_md: '# 已核查的正文',
-    video_script: '这里是口播', remotion_data: { scenes: [{ source: '样本来源' }] },
+    video_script: '这里是口播', remotion_data: { scenes: [{ source: '样本来源（2024）' }] },
     final_md: '# 已核查的正文', final_content: '# 已核查的正文', workflow_status: '已定稿', compliance_risk: '低风险',
   })
 })
@@ -171,13 +171,17 @@ it('配置 WF3 时重新核对持久化内容，阻止高风险回写和未保�
   const renderButton = await modal.findByRole<HTMLButtonElement>('button', { name: '提交 Remotion 渲染' })
   fireEvent.click(modal.getByRole('tab', { name: 'Remotion 渲染数据' }))
   const editor = modal.getByRole('textbox', { name: 'Remotion JSON' })
-  fireEvent.change(editor, { target: { value: '{"scenes":[{"source":"另一份样稿"}]}' } })
+  fireEvent.change(editor, { target: { value: '{"scenes":[{"source":"另一份样稿（2025）"}]}' } })
   expect(renderButton.disabled).toBe(true)
-  fireEvent.change(editor, { target: { value: '{"scenes":[{"source":"样本来源"}]}' } })
+  fireEvent.change(editor, { target: { value: '{"scenes":[{"source":"样本来源（2024）"}]}' } })
   fireEvent.click(renderButton)
   await modal.findByText('Remotion 渲染请求已受理')
   expect(read).toHaveBeenCalledTimes(2)
   expect(trigger).toHaveBeenCalledExactlyOnceWith(1)
+  expect(renderButton.disabled).toBe(true)
+  read.mockResolvedValueOnce({ ...ready, render_status: 'failed', render_error: '模拟渲染失败' })
+  fireEvent.click(modal.getByRole('button', { name: '刷新渲染状态' }))
+  await modal.findByText(/模拟渲染失败/)
   read.mockResolvedValueOnce(main)
   fireEvent.click(modal.getByRole('button', { name: '提交 Remotion 渲染' }))
   await modal.findByText(/不满足渲染条件/)

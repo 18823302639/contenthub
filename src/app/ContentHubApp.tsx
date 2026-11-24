@@ -1,4 +1,4 @@
-import { ArrowLeft, ChartNoAxesCombined, ChevronRight, Layers3, LayoutGrid, Rss, SquarePen } from 'lucide-react'
+import { ArrowLeft, ChartNoAxesCombined, ChevronRight, Layers3, LayoutGrid, Menu, Rss, SquarePen, X } from 'lucide-react'
 import { lazy, Suspense, useEffect, useRef } from 'react'
 import { Link, Navigate, NavLink, Route, Routes, useLocation } from 'react-router-dom'
 import type { ContentHubApi } from '../api'
@@ -7,13 +7,16 @@ import { useRssSync } from '../features/rssSync/useRssSync'
 import { SourcesPage } from '../features/sources/SourcesPage'
 import { useSources } from '../features/sources/useSources'
 import { TopicsPage } from '../features/topics/TopicsPage'
+import { UnsavedChanges } from './UnsavedChanges'
 import { useRecordWrites } from './useRecordWrites'
-import { WorkbenchPage } from '../features/workbench/WorkbenchPage'
 import type { WorkbenchSession } from '../features/workbench/useWorkbench'
 import { useTopicBoard } from '../features/topics/useTopicBoard'
 
 const AnalyticsPage = lazy(() => import('../features/analytics/AnalyticsPage')
   .then(module => ({ default: module.AnalyticsPage })))
+
+const WorkbenchPage = lazy(() => import('../features/workbench/WorkbenchPage')
+  .then(module => ({ default: module.WorkbenchPage })))
 
 const links = [
   { to: '/topics', label: '选题看板', icon: LayoutGrid },
@@ -21,6 +24,17 @@ const links = [
   { to: '/sources', label: '信源管理', icon: Rss },
   { to: '/analytics', label: '运营数据', icon: ChartNoAxesCombined },
 ]
+
+function Navigation({ onSelect }: { onSelect?: () => void }) {
+  return <nav className="workspace-nav" aria-label="主导航">
+    {links.map(({ to, label, icon: Icon }) => (
+      <NavLink key={to} to={to} title={label} onClick={onSelect}
+        className={({ isActive }) => isActive ? 'nav-link nav-link--active' : 'nav-link'}>
+        <Icon size={17} strokeWidth={1.9} aria-hidden /><span>{label}</span>
+      </NavLink>
+    ))}
+  </nav>
+}
 
 function Placeholder({ title, text }: { title: string; text: string }) {
   return (
@@ -39,8 +53,9 @@ export function ContentHubApp({ api }: { api: ContentHubApi }) {
   const sources = useSources(api)
   const analytics = useAnalytics(api)
   const { pathname } = useLocation()
+  const mobileNav = useRef<HTMLDialogElement>(null)
   const syncPage = pathname === '/topics' || pathname === '/sources' ? pathname : null
-  const rssSync = useRssSync(api, syncPage)
+  const rssSync = useRssSync(api, syncPage, board)
   const refreshedCollection = useRef(0)
   const refreshCollectionList = syncPage === '/sources' ? sources.refresh : syncPage === '/topics' ? board.refresh : null
   const collectionListBusy = syncPage === '/sources' ? sources.loading || sources.writing : board.loading
@@ -54,7 +69,7 @@ export function ContentHubApp({ api }: { api: ContentHubApi }) {
   const mode = api.mode === 'mock' ? 'Mock · 离线演示' : '真实数据模式'
 
   return (
-    <div className="workspace">
+    <UnsavedChanges><div className="workspace">
       <a className="skip-link" href="#content-start" onClick={event => {
         event.preventDefault()
         document.getElementById('content-start')?.focus()
@@ -67,13 +82,7 @@ export function ContentHubApp({ api }: { api: ContentHubApi }) {
             <span>内容工作区</span>
           </span>
         </Link>
-        <nav className="workspace-nav" aria-label="主导航">
-          {links.map(({ to, label, icon: Icon }) => (
-            <NavLink key={to} to={to} title={label} className={({ isActive }) => isActive ? 'nav-link nav-link--active' : 'nav-link'}>
-              <Icon size={17} strokeWidth={1.9} aria-hidden /><span>{label}</span>
-            </NavLink>
-          ))}
-        </nav>
+        <Navigation />
         <div className="workspace-mode" title={mode}>
           <span className={api.mode === 'mock' ? 'mode-dot' : 'mode-dot mode-dot--real'} aria-hidden />
           <span>{mode}</span>
@@ -82,18 +91,31 @@ export function ContentHubApp({ api }: { api: ContentHubApi }) {
 
       <div className="workspace-body">
         <header className="workspace-bar">
+          <button type="button" className="button button--quiet mobile-menu-trigger" aria-label="打开导航"
+            aria-haspopup="dialog" onClick={() => mobileNav.current?.showModal()}><Menu size={21} aria-hidden /></button>
           <span>工作区</span>
           <ChevronRight size={14} aria-hidden />
           <strong>{active?.label ?? (pathname === '/' ? '选题看板' : '页面不存在')}</strong>
         </header>
+        <dialog ref={mobileNav} className="mobile-navigation" aria-labelledby="mobile-navigation-title"
+          onClick={event => { if (event.target === event.currentTarget) event.currentTarget.close() }}>
+          <div className="mobile-navigation-panel">
+            <header><strong id="mobile-navigation-title">ContentHub</strong>
+              <button type="button" className="button button--quiet" aria-label="关闭导航"
+                onClick={() => mobileNav.current?.close()}><X size={20} aria-hidden /></button>
+            </header>
+            <Navigation onSelect={() => mobileNav.current?.close()} />
+          </div>
+        </dialog>
         <main className="workspace-content" id="content-start" tabIndex={-1}>
           <Routes>
             <Route index element={<Navigate to="/topics" replace />} />
             <Route path="/topics" element={<TopicsPage api={api} board={board} writes={writes} rssSync={rssSync} />} />
-            <Route path="/workbench" element={<Placeholder title="改稿台" text="从选题看板选择一条选题进入改稿台。" />} />
-            <Route path="/workbench/:id" element={(
-              <WorkbenchPage api={api} writes={writes} sessions={workbenchSessions.current}
-                onWrite={board.observeWorkbenchWrite} refreshBoard={board.refreshIfLoaded} />
+            <Route path="/workbench/:id?" element={(
+              <Suspense fallback={<p role="status">正在载入改稿台…</p>}>
+                <WorkbenchPage api={api} writes={writes} queue={board} sessions={workbenchSessions.current}
+                  onWrite={board.observeWorkbenchWrite} refreshBoard={board.refreshIfLoaded} />
+              </Suspense>
             )} />
             <Route path="/sources" element={<SourcesPage model={sources} rssSync={rssSync} />} />
             <Route path="/analytics" element={(
@@ -105,6 +127,6 @@ export function ContentHubApp({ api }: { api: ContentHubApi }) {
           </Routes>
         </main>
       </div>
-    </div>
+    </div></UnsavedChanges>
   )
 }

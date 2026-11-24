@@ -65,19 +65,7 @@
 .wb-video-field select:disabled { cursor: not-allowed; opacity: .65; }
 .wb-video-label { color: var(--muted); font-size: 12px; font-weight: 650; }
 .wb-video-notice { margin-top: 8px; }
-.topic-feedback.wb-video-notice--ready {
-  border-color: #cde6d6;
-  background: #edf8f0;
-  color: #205a3b;
-}
-.wb-video-progress {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 7px;
-}
-.wb-video-progress > svg { flex: none; }
-.wb-video-progress [role='timer'] { font-variant-numeric: tabular-nums; }
+.wb-video-notice > [role='status'] { min-width: 0; }
 .wb-video-notice code { overflow-wrap: anywhere; }
 .wb-video-notice .button { margin-inline-start: auto; }
 .wb-notice { margin-bottom: 10px; }
@@ -167,4 +155,60 @@
 @media (max-width: 490px) {
   .wb-toolbar, .wb-source-body, .wb-editor-body { padding: 10px; }
   .wb-editor { min-height: 270px; }
+}
+
+.wb-workspace { display: grid; grid-template-columns: minmax(160px, 210px) minmax(0, 1fr); align-items: start; gap: 14px; }
+.wb-workspace-editor { min-width: 0; }
+.wb-queue {
+  position: sticky; inset-block-start: 12px; min-width: 0; border: 1px solid var(--line);
+  background: var(--surface); padding: 8px; border-radius: 8px; color: var(--muted); font-size: 12px;
+}
+.wb-queue-head { display: flex; align-items: center; justify-content: space-between; }
+.wb-queue-head .button { padding-inline: 4px; }
+.wb-queue-desktop { max-height: 66vh; overflow: auto; }
+.wb-queue-desktop a { display: grid; gap: 4px; min-height: 42px; padding: 8px; border-radius: 6px; overflow-wrap: anywhere; }
+.wb-queue-desktop a:hover, .wb-queue-desktop a[aria-current] { background: #efedfc; color: var(--accent); }
+.wb-queue-status { width: max-content; max-width: 100%; padding: 1px 5px; border-radius: 4px; background: #f1f2f8; }
+.wb-queue-mobile { display: none; }
+.wb-action-footer {
+  display: grid; gap: 7px; margin-top: 12px; padding: 10px; border: 1px solid var(--line);
+  border-radius: 8px; background: var(--surface); font-size: 12px;
+}
+.wb-action-footer small { color: var(--muted); }
+.wb-footer-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; }
+.wb-footer-actions label { display: flex; align-items: center; gap: 5px; }
+.wb-remotion { display: grid; gap: 10px; margin-top: 10px; }
+.wb-remotion details { padding: 8px; border: 1px solid var(--line); border-radius: 8px; }
+.wb-remotion summary { cursor: pointer; font-weight: 650; }
+.wb-remotion label { display: block; margin-top: 8px; font-size: 13px; }
+.wb-remotion textarea { width: 100%; min-height: 105px; margin-top: 4px; padding: 8px; border: 1px solid var(--line); border-radius: 7px; }
+.wb-remotion .desk-json { font-family: ui-monospace, Consolas, monospace; }
+@media (max-width: 767px) {
+  .wb-workspace { grid-template-columns: minmax(0, 1fr); }
+  .wb-queue { position: static; padding: 8px; }
+  .wb-queue-head, .wb-queue-desktop { display: none; }
+  .wb-queue-mobile { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+  .wb-queue-mobile label { width: 100%; }
+  .wb-queue-mobile select {
+    flex: 1; min-width: 0; min-height: 44px; border: 1px solid var(--line); background: var(--surface);
+    border-radius: 7px; padding: 5px;
+  }
+  .wb-queue-mobile .button, .wb-footer-actions .button { min-height: 44px; }
+  .wb-action-footer { position: sticky; bottom: 0; z-index: 1; padding-bottom: max(8px, env(safe-area-inset-bottom)); }
+  .wb-workspace-editor { min-height: calc(100dvh - 60px); }
+  .wb-footer-actions .button { flex: 1 1 auto; white-space: normal; }
+  .wb-footer-actions label { min-height: 36px; }
+  .wb-tabs { flex-wrap: nowrap; overflow-x: auto; }
+  .wb-tabs button { flex-shrink: 0; white-space: nowrap; }
+}
+
+.wb-queue-filter { display: grid; gap: 4px; padding: 3px 4px 7px; }
+.wb-queue-filter input, .wb-footer-ai input {
+  min-width: 0; min-height: 35px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface);
+}
+.wb-footer-ai { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.wb-footer-ai input { flex: 1 1 150px; }
+@media (max-width: 767px) {
+  .wb-queue-filter input, .wb-footer-ai input, .wb-footer-ai .button { min-height: 44px; }
+  .wb-action-footer { max-height: 47dvh; overflow-y: auto; }
 }

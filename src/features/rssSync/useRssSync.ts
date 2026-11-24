@@ -8,7 +8,9 @@ function detail(error: unknown) {
   return error instanceof Error ? ' ' + error.message : ''
 }
 
-export function useRssSync(api: ContentHubApi, page: '/topics' | '/sources' | null) {
+export function useRssSync(api: ContentHubApi, page: '/topics' | '/sources' | null,
+  topics?: { totalRows: number | null; listVersion: number },
+) {
   const [settings, setSettings] = useState<RssSyncSettings | null>(null)
   const [reading, setReading] = useState(false)
   const [readError, setReadError] = useState<string | null>(null)
@@ -17,6 +19,9 @@ export function useRssSync(api: ContentHubApi, page: '/topics' | '/sources' | nu
   const [syncing, setSyncing] = useState(false)
   const [syncNotice, setSyncNotice] = useState<Notice | null>(null)
   const [acceptedCount, setAcceptedCount] = useState(0)
+  const [baseline, setBaseline] = useState<{
+    total: number | null; version: number; lastSync: string | null; added: number | null
+  } | null>(null)
   const readVersion = useRef(0)
   const saving = useRef(false)
   const submitting = useRef(false)
@@ -67,9 +72,15 @@ export function useRssSync(api: ContentHubApi, page: '/topics' | '/sources' | nu
     submitting.current = true
     setSyncing(true)
     setSyncNotice(null)
+    setBaseline(null)
+    const before = {
+      total: topics?.totalRows ?? null, version: topics?.listVersion ?? 0,
+      lastSync: settings?.last_synced_at ?? null, added: settings?.last_sync_added_count ?? null,
+    }
     try {
       await api.triggerWebhook('rss-sync-now', {})
       setSyncNotice({ text: '已触发采集，请稍后刷新查看新选题' })
+      if (page === '/topics' || before.total !== null) setBaseline(before)
       setAcceptedCount(count => count + 1)
       void refreshSettings()
     } catch (error) {
@@ -82,6 +93,17 @@ export function useRssSync(api: ContentHubApi, page: '/topics' | '/sources' | nu
     }
   }
 
-  return { settings, reading, readError, pendingInterval, frequencyNotice, syncing, syncNotice,
+  const total = topics?.totalRows
+  const reported = settings?.last_sync_added_count
+  const newResult = Boolean(settings?.last_synced_at && settings.last_synced_at !== baseline?.lastSync) ||
+    Boolean(baseline && reported != null && reported !== baseline.added)
+  const added = Number.isSafeInteger(reported) && newResult
+    ? reported
+    : total != null && baseline?.total != null ? Math.max(0, total - baseline.total) : null
+  const result = baseline && topics && topics.listVersion > baseline.version && total != null && added != null
+    ? added ? `刷新完成：本次新增 ${added} 条，当前共 ${total} 条` : `暂无新增选题，当前共 ${total} 条`
+    : null
+
+  return { settings, reading, readError, pendingInterval, frequencyNotice, syncing, syncNotice, result,
     acceptedCount, changeInterval, refreshSettings, syncNow }
 }
